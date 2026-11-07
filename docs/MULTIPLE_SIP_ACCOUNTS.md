@@ -15,12 +15,12 @@ Allow TomOS SIP to configure and register more than one independent SIP identity
 
 ## Delivery stages
 
-1. Add profile and validation domain types. (Started)
-2. Add encrypted credential storage and safe migration behaviour.
-3. Implement the Linphone account registry and per-account registration callbacks.
+1. Add profile and validation domain types. (Implemented)
+2. Add Android Keystore-backed credential storage and non-secret profile persistence. (Implemented; not yet wired into registration UI)
+3. Implement the Linphone account registry and per-account registration callbacks. (Next)
 4. Add account management UI, registration indicators and selected outgoing account.
 5. Route outgoing calls through the selected identity and expose the receiving identity during incoming calls.
-6. Add automated tests and expand the PBX/device checklist.
+6. Add automated and Android Keystore instrumentation tests; expand the PBX/device checklist.
 
 ## Acceptance criteria
 
@@ -35,4 +35,4 @@ Allow TomOS SIP to configure and register more than one independent SIP identity
 
 ## Current limitation
 
-The initial profile model is not yet connected to Linphone Core or the UI. Multi-account registration is not available until stages 2–4 are implemented and tested.
+The profile model, profile metadata store and encrypted credential store now exist. The credential store uses a separate Android Keystore AES-256-GCM key per account; preferences contain only Base64-encoded IV and ciphertext. The profile metadata JSON contains no password field. The stores are not yet wired into registration UI or Linphone Core. Multi-account registration is not available until stages 3–5 are implemented and tested. If Android restores encrypted preferences without the corresponding Keystore key, the affected SIP password must be entered again.
