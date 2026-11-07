@@ -19,7 +19,7 @@ gradle --no-daemon --stacktrace assembleDebug
 The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`.
 
 ## Current limitations / validation
-- The current SIP Core is owned by the activity. A lifecycle-managed Android foreground service is still required for reliable registration and incoming calls while the app is backgrounded or closed.
+- The Linphone SDK CoreService has been declared as an Android phone-call foreground service. Real-device testing is still required to confirm background registration and incoming-call delivery across Android versions and OEM battery policies.
 - Incoming-call notifications require notification permission on Android 13 and later.
 - Test calls, audio routing, registration, NAT traversal and TLS against a real PBX before production use.
 - Asterisk uses standard SIP/PJSIP registration; deployment-specific host, port, transport, extension/auth ID, password and TLS settings must be supplied for end-to-end validation.
