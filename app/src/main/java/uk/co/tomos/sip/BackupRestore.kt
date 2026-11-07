@@ -37,7 +37,13 @@ internal object TomosBackupCodec {
         val document = try { gson.fromJson(root, TomosBackupDocument::class.java) } catch (_: Exception) {
             throw IllegalArgumentException("This is not a valid TomOS backup file.")
         } ?: throw IllegalArgumentException("This is not a valid TomOS backup file.")
-        validate(document)
+        try {
+            validate(document)
+        } catch (error: IllegalArgumentException) {
+            throw error
+        } catch (_: Exception) {
+            throw IllegalArgumentException("Backup contains invalid or incomplete data.")
+        }
         return document
     }
 
