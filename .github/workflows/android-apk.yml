@@ -29,12 +29,7 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Build debug APK
-        run: |
-          if [ "${GITHUB_REF}" = "refs/heads/main" ]; then
-            gradle --no-daemon --stacktrace -PversionCode="${GITHUB_RUN_NUMBER}" assembleDebug
-          else
-            gradle --no-daemon --stacktrace assembleDebug
-          fi
+        run: gradle --no-daemon --stacktrace -PversionCode="${GITHUB_RUN_NUMBER}" assembleDebug
 
       - name: Verify APK exists
         run: test -s app/build/outputs/apk/debug/app-debug.apk
