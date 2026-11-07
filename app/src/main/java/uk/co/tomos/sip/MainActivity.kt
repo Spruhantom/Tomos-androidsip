@@ -971,22 +971,31 @@ private fun TomSipScreen(engine: TomSipEngine) {
     var updateMessage by remember { mutableStateOf("Checking GitHub releases…") }
     var availableUpdate by remember { mutableStateOf<GitHubUpdate?>(null) }
     var updateCheckKey by remember { mutableIntStateOf(0) }
-    var backupMessage by remember { mutableStateOf("Back up contacts and call history before reinstalling.") }
+    var backupMessage by remember { mutableStateOf("Create a password-protected backup before reinstalling.") }
+    var showExportPasswordDialog by remember { mutableStateOf(false) }
+    var exportPassword by remember { mutableStateOf("") }
+    var exportPasswordConfirm by remember { mutableStateOf("") }
+    var showImportPasswordDialog by remember { mutableStateOf(false) }
+    var importPassword by remember { mutableStateOf("") }
+    var pendingEncryptedImport by remember { mutableStateOf<ByteArray?>(null) }
+    var pendingExportBytes by remember { mutableStateOf<ByteArray?>(null) }
     var backupRemindersEnabled by remember { mutableStateOf(context.getSharedPreferences("tomos_sip", Context.MODE_PRIVATE).getBoolean("backup_reminders_enabled", false)) }
     LaunchedEffect(backupRemindersEnabled) {
         context.getSharedPreferences("tomos_sip", Context.MODE_PRIVATE).edit().putBoolean("backup_reminders_enabled", backupRemindersEnabled).apply()
         if (backupRemindersEnabled) BackupReminderScheduler.schedule(context) else BackupReminderScheduler.cancel(context)
     }
     var pendingBackup by remember { mutableStateOf<TomosBackupDocument?>(null) }
-    val exportBackupLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+    val exportBackupLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
         if (uri != null) {
             try {
-                val json = TomosBackupCodec.encode(engine.contacts, engine.history)
-                context.contentResolver.openOutputStream(uri)?.bufferedWriter(Charsets.UTF_8)?.use { it.write(json) }
+                val bytes = pendingExportBytes ?: throw IllegalStateException("No encrypted backup is ready.")
+                context.contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
                     ?: throw IllegalStateException("Android couldn't open the selected backup file.")
-                backupMessage = "Backup saved. Keep this file somewhere safe before reinstalling."
+                backupMessage = "Encrypted backup saved. Keep the password safe; it cannot be recovered."
             } catch (error: Exception) {
                 backupMessage = "Backup failed: ${error.message ?: "could not save file"}"
+            } finally {
+                pendingExportBytes = null
             }
         }
     }
@@ -1003,13 +1012,21 @@ private fun TomSipScreen(engine: TomSipEngine) {
                         val count = stream.read(buffer)
                         if (count < 0) break
                         total += count
-                        require(total <= TomosBackupCodec.MAX_BACKUP_BYTES) { "Backup file is larger than 5 MB." }
+                        require(total <= TomosBackupEncryption.MAX_ENCRYPTED_BYTES) { "Backup file is larger than 5 MB." }
                         output.write(buffer, 0, count)
                     }
                     output.toByteArray()
                 }
-                pendingBackup = TomosBackupCodec.decode(bytes.toString(Charsets.UTF_8))
-                backupMessage = "Backup checked. Confirm below to replace the current contacts and call history."
+                if (TomosBackupEncryption.isEncrypted(bytes)) {
+                    pendingEncryptedImport = bytes
+                    importPassword = ""
+                    showImportPasswordDialog = true
+                    backupMessage = "Encrypted backup selected. Enter its password to validate it."
+                } else {
+                    // Continue to support existing unencrypted JSON backups.
+                    pendingBackup = TomosBackupCodec.decode(bytes.toString(Charsets.UTF_8))
+                    backupMessage = "Legacy backup checked. Confirm below to replace the current contacts and call history."
+                }
             } catch (error: Exception) {
                 pendingBackup = null
                 backupMessage = "Restore failed: ${error.message ?: "invalid backup file"}"
@@ -1060,6 +1077,66 @@ private fun TomSipScreen(engine: TomSipEngine) {
         primary = Pink, secondary = Cyan, background = Void, surface = Panel,
         onPrimary = Color.White, onBackground = Color.White, onSurface = Color.White
     )) {
+        if (showExportPasswordDialog) {
+            AlertDialog(
+                onDismissRequest = { showExportPasswordDialog = false; exportPassword = ""; exportPasswordConfirm = "" },
+                title = { Text("Encrypt backup") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("Choose a password of at least 8 characters. You will need it to restore this backup after reinstalling.")
+                        OutlinedTextField(exportPassword, { exportPassword = it }, label = { Text("Backup password") }, singleLine = true, visualTransformation = PasswordVisualTransformation(), colors = fieldColors())
+                        OutlinedTextField(exportPasswordConfirm, { exportPasswordConfirm = it }, label = { Text("Confirm password") }, singleLine = true, visualTransformation = PasswordVisualTransformation(), colors = fieldColors())
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        try {
+                            require(exportPassword.length >= 8) { "Use at least 8 characters." }
+                            require(exportPassword == exportPasswordConfirm) { "The passwords do not match." }
+                            val json = TomosBackupCodec.encode(engine.contacts, engine.history)
+                            pendingExportBytes = TomosBackupEncryption.encrypt(json.toByteArray(Charsets.UTF_8), exportPassword.toCharArray())
+                            showExportPasswordDialog = false
+                            exportBackupLauncher.launch("tomos-sip-backup.tomos")
+                        } catch (error: Exception) {
+                            backupMessage = "Backup failed: ${error.message ?: "could not encrypt backup"}"
+                        } finally {
+                            exportPassword = ""
+                            exportPasswordConfirm = ""
+                        }
+                    }) { Text("ENCRYPT & EXPORT", color = Cyan) }
+                },
+                dismissButton = { TextButton(onClick = { showExportPasswordDialog = false; exportPassword = ""; exportPasswordConfirm = "" }) { Text("CANCEL") } }
+            )
+        }
+        if (showImportPasswordDialog) {
+            AlertDialog(
+                onDismissRequest = { showImportPasswordDialog = false; pendingEncryptedImport = null; importPassword = "" },
+                title = { Text("Unlock encrypted backup") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Enter the password used when this backup was created.")
+                        OutlinedTextField(importPassword, { importPassword = it }, label = { Text("Backup password") }, singleLine = true, visualTransformation = PasswordVisualTransformation(), colors = fieldColors())
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        try {
+                            val encrypted = pendingEncryptedImport ?: throw IllegalStateException("No encrypted backup is selected.")
+                            val plaintext = TomosBackupEncryption.decrypt(encrypted, importPassword.toCharArray())
+                            pendingBackup = TomosBackupCodec.decode(plaintext.toString(Charsets.UTF_8))
+                            backupMessage = "Encrypted backup verified. Confirm below to restore contacts and call history."
+                            showImportPasswordDialog = false
+                            pendingEncryptedImport = null
+                        } catch (error: Exception) {
+                            backupMessage = "Could not unlock backup: ${error.message ?: "incorrect password or damaged file"}"
+                        } finally {
+                            importPassword = ""
+                        }
+                    }) { Text("UNLOCK BACKUP", color = Cyan) }
+                },
+                dismissButton = { TextButton(onClick = { showImportPasswordDialog = false; pendingEncryptedImport = null; importPassword = "" }) { Text("CANCEL") } }
+            )
+        }
         if (pendingBackup != null) {
             val backup = pendingBackup!!
             AlertDialog(
@@ -1355,7 +1432,7 @@ private fun TomSipScreen(engine: TomSipEngine) {
             Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(20.dp)) {
                 Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("DATA BACKUP & RESTORE", color = Cyan, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
-                    Text("Export contacts and call history to a JSON file, then import it after reinstalling TomOS SIP.", color = Muted, fontSize = 12.sp)
+                    Text("Export contacts and call history as an encrypted backup, then restore it after reinstalling TomOS SIP. Older JSON backups can still be imported.", color = Muted, fontSize = 12.sp)
                     Text(backupMessage, color = Color.White, fontSize = 12.sp)
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -1365,10 +1442,10 @@ private fun TomSipScreen(engine: TomSipEngine) {
                         Switch(checked = backupRemindersEnabled, onCheckedChange = { backupRemindersEnabled = it })
                     }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { exportBackupLauncher.launch("tomos-sip-backup.json") }, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = Cyan, contentColor = Void)) { Text("EXPORT BACKUP") }
-                        OutlinedButton(onClick = { importBackupLauncher.launch(arrayOf("application/json", "text/json", "application/octet-stream")) }, modifier = Modifier.weight(1f)) { Text("IMPORT BACKUP") }
+                        Button(onClick = { showExportPasswordDialog = true }, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = Cyan, contentColor = Void)) { Text("ENCRYPT & EXPORT") }
+                        OutlinedButton(onClick = { importBackupLauncher.launch(arrayOf("application/json", "text/json", "application/octet-stream", "*/*")) }, modifier = Modifier.weight(1f)) { Text("IMPORT BACKUP") }
                     }
-                    Text("SIP passwords and account credentials are deliberately excluded. Restore replaces contacts and call history only. Keep the backup file outside the app before uninstalling.", color = Muted, fontSize = 11.sp)
+                    Text("AES-256-GCM encryption protects the backup with your password. SIP credentials are deliberately excluded. Keep both the file and password safe outside the app; a forgotten password cannot be recovered.", color = Muted, fontSize = 11.sp)
                 }
             }
             Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(20.dp)) {
