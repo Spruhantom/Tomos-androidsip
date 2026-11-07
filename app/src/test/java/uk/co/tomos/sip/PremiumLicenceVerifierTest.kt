@@ -40,6 +40,15 @@ class PremiumLicenceVerifierTest {
             .put("signed_payload", Base64.getEncoder().encodeToString(payloadBytes))
             .put("signature", Base64.getEncoder().encodeToString(signature))
             .put("payload", JSONObject(canonical))
-        assertTrue(PremiumLicenceVerifier(publicPem).verify(document, code))
+        val verifier = PremiumLicenceVerifier(publicPem)
+        assertTrue(verifier.verify(document, code))
+
+        val alteredMirror = JSONObject(document.toString()).apply {
+            put("payload", JSONObject(canonical).put("customer_reference", "tampered"))
+        }
+        assertFalse(verifier.verify(alteredMirror, code))
+        assertFalse(verifier.verify(document, code + "!"))
+        assertFalse(verifier.verify(document, code + "é"))
+        assertFalse(verifier.verify(document, code.replace("-", "")))
     }
 }
