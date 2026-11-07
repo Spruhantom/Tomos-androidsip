@@ -407,18 +407,30 @@ class TomSipEngine(context: android.content.Context) {
     ) {
         try {
             val cleanDomain = domain.trim().removePrefix("sip:").removePrefix("sips:")
+            val transportType = runCatching { SipTransport.valueOf(transport.uppercase()) }.getOrDefault(SipTransport.UDP)
+            val existing = sipAccounts.firstOrNull {
+                it.username.equals(username.trim(), ignoreCase = true) &&
+                    it.domain.equals(cleanDomain, ignoreCase = true) &&
+                    it.transport == transportType &&
+                    it.port == (sipPort.toIntOrNull() ?: 0)
+            }
             val profile = SipAccountProfile(
+                id = existing?.id ?: java.util.UUID.randomUUID().toString(),
                 label = displayName.trim().ifBlank { username.trim() },
                 username = username.trim(),
                 authUsername = authUsername.trim(),
                 domain = cleanDomain,
-                transport = runCatching { SipTransport.valueOf(transport.uppercase()) }.getOrDefault(SipTransport.UDP),
+                transport = transportType,
                 port = sipPort.toIntOrNull() ?: 0,
                 displayName = displayName.trim().ifBlank { username.trim() },
                 expirySeconds = expirySeconds.toIntOrNull() ?: 0
             )
             val validationError = validateSipAccount(profile)
             require(validationError == null) { validationError ?: "Invalid SIP account." }
+            runtimeAccounts.remove(profile.id)?.let { previous ->
+                accountIdsByIdentity.remove(previous.params.identityAddress?.asStringUriOnly())
+                core.removeAccount(previous)
+            }
             credentialStore.save(profile.id, password)
             persistAccountProfile(profile)
             configureAccount(profile, password, makeDefault = true)
