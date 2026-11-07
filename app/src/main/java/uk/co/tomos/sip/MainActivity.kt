@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.os.SystemClock
 import android.provider.Settings
 import java.io.File
 import androidx.core.content.FileProvider
@@ -41,6 +42,7 @@ import org.linphone.core.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import org.json.JSONArray
 import java.net.HttpURLConnection
 import java.net.URL
@@ -155,6 +157,12 @@ class TomSipEngine(context: android.content.Context) {
         private set
     var incomingCaller by mutableStateOf<String?>(null)
         private set
+    var activeCall by mutableStateOf(false)
+        private set
+    var activeCallName by mutableStateOf("Unknown caller")
+        private set
+    var callStartedAtMillis by mutableLongStateOf(0L)
+        private set
     var muted by mutableStateOf(false)
         private set
     var held by mutableStateOf(false)
@@ -183,15 +191,32 @@ class TomSipEngine(context: android.content.Context) {
                     RegistrationState.Cleared -> "Not registered"
                     else -> message
                 }
+                updateStatusNotification()
             }
             override fun onCallStateChanged(core: Core, call: Call, state: Call.State, message: String) {
+                val remoteName = call.remoteAddress?.displayName?.takeIf { it.isNotBlank() }
+                    ?: call.remoteAddress?.username?.takeIf { it.isNotBlank() }
+                    ?: "Unknown caller"
                 if (state == Call.State.IncomingReceived || state == Call.State.IncomingEarlyMedia) {
-                    incomingCaller = call.remoteAddress?.username ?: "Unknown caller"
-                    postIncomingNotification(incomingCaller ?: "Incoming call")
+                    incomingCaller = remoteName
+                    activeCallName = remoteName
+                    activeCall = true
+                    postIncomingNotification(remoteName)
                 }
-                if (state == Call.State.Connected || state == Call.State.StreamsRunning) incomingCaller = null
+                if (state == Call.State.OutgoingInit || state == Call.State.OutgoingProgress || state == Call.State.OutgoingRinging) {
+                    activeCallName = remoteName
+                    activeCall = true
+                }
+                if (state == Call.State.Connected || state == Call.State.StreamsRunning) {
+                    incomingCaller = null
+                    activeCall = true
+                    if (callStartedAtMillis == 0L) callStartedAtMillis = SystemClock.elapsedRealtime()
+                }
+                if (state == Call.State.Paused) activeCall = true
                 if (state == Call.State.End || state == Call.State.Released || state == Call.State.Error) {
                     incomingCaller = null
+                    activeCall = false
+                    callStartedAtMillis = 0L
                     history = (listOf((call.remoteAddress?.username ?: "Unknown") + " • " + state.name) + history).take(50)
                     prefs.edit().putString("history", history.joinToString("\n")).apply()
                 }
@@ -203,6 +228,7 @@ class TomSipEngine(context: android.content.Context) {
                     Call.State.End, Call.State.Released, Call.State.Error -> "Call ended"
                     else -> message
                 }
+                updateStatusNotification()
             }
         })
         core.start()
@@ -313,16 +339,58 @@ class TomSipEngine(context: android.content.Context) {
         } catch (e: Exception) { callStatus = e.message ?: "Call failed" }
     }
 
+    private fun notificationManager(): NotificationManager =
+        appContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+    private fun canPostNotifications(): Boolean =
+        Build.VERSION.SDK_INT < 33 ||
+            androidx.core.content.ContextCompat.checkSelfPermission(appContext, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+
+    private fun appPendingIntent(): PendingIntent? {
+        val intent = appContext.packageManager.getLaunchIntentForPackage(appContext.packageName) ?: return null
+        return PendingIntent.getActivity(appContext, 1002, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+    }
+
+    private fun updateStatusNotification() {
+        if (!canPostNotifications()) return
+        val manager = notificationManager()
+        if (Build.VERSION.SDK_INT >= 26) {
+            manager.createNotificationChannel(
+                NotificationChannel("sip_status", "SIP connection", NotificationManager.IMPORTANCE_LOW).apply {
+                    description = "Shows TomOS SIP registration and active-call status"
+                    setShowBadge(false)
+                }
+            )
+        }
+        if (!registered && !activeCall) {
+            manager.cancel(1002)
+            return
+        }
+        val title = if (activeCall) "TomOS SIP • $callStatus" else "TomOS SIP • Registered"
+        val detail = if (activeCall) {
+            if (callStartedAtMillis > 0L) activeCallName else "Call with $activeCallName"
+        } else "Your SIP account is registered and ready for calls"
+        val notification = NotificationCompat.Builder(appContext, "sip_status")
+            .setSmallIcon(android.R.drawable.sym_action_call)
+            .setContentTitle(title)
+            .setContentText(detail)
+            .setCategory(if (activeCall) NotificationCompat.CATEGORY_CALL else NotificationCompat.CATEGORY_SERVICE)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setContentIntent(appPendingIntent())
+            .build()
+        manager.notify(1002, notification)
+    }
+
     private fun postIncomingNotification(caller: String) {
-        if (Build.VERSION.SDK_INT >= 33 && androidx.core.content.ContextCompat.checkSelfPermission(appContext, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
-        val manager = appContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        if (!canPostNotifications()) return
+        val manager = notificationManager()
         if (Build.VERSION.SDK_INT >= 26) manager.createNotificationChannel(NotificationChannel("incoming_calls", "Incoming calls", NotificationManager.IMPORTANCE_HIGH))
-        val intent = appContext.packageManager.getLaunchIntentForPackage(appContext.packageName)
-        val pending = intent?.let { PendingIntent.getActivity(appContext, 0, it, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE) }
         val notification = NotificationCompat.Builder(appContext, "incoming_calls")
             .setSmallIcon(android.R.drawable.sym_call_incoming).setContentTitle("TomOS SIP • Incoming call")
             .setContentText(caller).setCategory(NotificationCompat.CATEGORY_CALL)
-            .setPriority(NotificationCompat.PRIORITY_MAX).setAutoCancel(true).setContentIntent(pending).build()
+            .setPriority(NotificationCompat.PRIORITY_MAX).setAutoCancel(true).setContentIntent(appPendingIntent()).build()
         manager.notify(1001, notification)
     }
     fun accept() { core.currentCall?.accept(); incomingCaller = null }
@@ -336,7 +404,13 @@ class TomSipEngine(context: android.content.Context) {
         prefs.edit().putString("contacts", contacts.joinToString("\n")).apply()
     }
     fun hangup() { core.currentCall?.terminate(); callStatus = "Call ended" }
-    fun shutdown() { try { core.stop() } catch (_: Exception) { } }
+    fun shutdown() {
+        try {
+            notificationManager().cancel(1001)
+            notificationManager().cancel(1002)
+            core.stop()
+        } catch (_: Exception) { }
+    }
 }
 
 @Composable
@@ -372,6 +446,14 @@ private fun TomSipScreen(engine: TomSipEngine) {
     var selectedTab by remember { mutableStateOf("Dialler") }
     val tabs = listOf("Dialler", "Contacts", "History", "Settings")
     val tabSymbols = mapOf("Dialler" to "☎", "Contacts" to "♙", "History" to "◷", "Settings" to "⚙")
+    var elapsedCallSeconds by remember { mutableIntStateOf(0) }
+    LaunchedEffect(engine.callStartedAtMillis, engine.activeCall) {
+        while (engine.activeCall && engine.callStartedAtMillis > 0L) {
+            elapsedCallSeconds = ((SystemClock.elapsedRealtime() - engine.callStartedAtMillis) / 1000L).toInt().coerceAtLeast(0)
+            delay(1000)
+        }
+        if (!engine.activeCall) elapsedCallSeconds = 0
+    }
 
     MaterialTheme(colorScheme = darkColorScheme(
         primary = Pink, secondary = Cyan, background = Void, surface = Panel,
@@ -398,7 +480,9 @@ private fun TomSipScreen(engine: TomSipEngine) {
                 }
             }
         ) { innerPadding ->
-        Column(
+        if (engine.activeCall) {
+            ActiveCallScreen(engine = engine, elapsedSeconds = elapsedCallSeconds, modifier = Modifier.fillMaxSize().padding(innerPadding))
+        } else Column(
             Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0xFF111426), Void, Color(0xFF090A12))))
                 .padding(innerPadding).verticalScroll(rememberScrollState()).padding(22.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp)
@@ -632,6 +716,71 @@ private fun TomSipScreen(engine: TomSipEngine) {
             Text("TOM OS  •  NEON PUNK EDITION", Modifier.fillMaxWidth(), color = Muted, fontSize = 10.sp, letterSpacing = 1.6.sp)
         }
         }
+    }
+}
+
+@Composable
+private fun ActiveCallScreen(engine: TomSipEngine, elapsedSeconds: Int, modifier: Modifier = Modifier) {
+    val isIncoming = engine.incomingCaller != null
+    Column(
+        modifier.background(Brush.verticalGradient(listOf(Void, Color(0xFF111326))))
+            .padding(horizontal = 24.dp, vertical = 28.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.SpaceBetween
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("TOMOS SIP", color = Cyan, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 3.sp)
+            Spacer(Modifier.height(24.dp))
+            Box(Modifier.size(112.dp).background(Panel, RoundedCornerShape(56.dp))
+                .border(2.dp, Cyan.copy(alpha = 0.65f), RoundedCornerShape(56.dp)), contentAlignment = Alignment.Center) {
+                Text("☎", color = Cyan, fontSize = 48.sp)
+            }
+            Spacer(Modifier.height(12.dp))
+            Text(engine.activeCallName, color = Color.White, fontSize = 27.sp, fontWeight = FontWeight.Bold)
+            Text(if (isIncoming) "INCOMING CALL" else engine.callStatus.uppercase(),
+                color = if (engine.callStatus == "On hold") Pink else Cyan,
+                fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+            if (engine.callStartedAtMillis > 0L) {
+                Text(String.format("%02d:%02d", elapsedSeconds / 60, elapsedSeconds % 60),
+                    color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.Light)
+            } else if (!isIncoming) Text("Connecting…", color = Muted, fontSize = 16.sp)
+        }
+        if (isIncoming) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+                Button(onClick = { engine.decline() }, Modifier.weight(1f).height(60.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Pink), shape = RoundedCornerShape(18.dp)) {
+                    Text("DECLINE", fontWeight = FontWeight.Bold)
+                }
+                Button(onClick = { engine.accept() }, Modifier.weight(1f).height(60.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Cyan, contentColor = Void), shape = RoundedCornerShape(18.dp)) {
+                    Text("ANSWER", fontWeight = FontWeight.Bold)
+                }
+            }
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(22.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                    CallControl("MUTE", engine.muted, "🎙") { engine.toggleMute() }
+                    CallControl("SPEAKER", engine.speaker, "🔊") { engine.toggleSpeaker() }
+                    CallControl(if (engine.held) "RESUME" else "HOLD", engine.held, "Ⅱ") { engine.toggleHold() }
+                }
+                Button(onClick = { engine.hangup() }, Modifier.fillMaxWidth(0.72f).height(64.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Pink), shape = RoundedCornerShape(22.dp)) {
+                    Text("END CALL", fontSize = 16.sp, fontWeight = FontWeight.Black, letterSpacing = 1.5.sp)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CallControl(label: String, selected: Boolean, symbol: String, onClick: () -> Unit) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        FilledTonalButton(onClick = onClick, modifier = Modifier.size(76.dp), shape = RoundedCornerShape(28.dp),
+            colors = ButtonDefaults.filledTonalButtonColors(
+                containerColor = if (selected) Cyan else Panel,
+                contentColor = if (selected) Void else Color.White
+            )) { Text(symbol, fontSize = 25.sp) }
+        Text(label, color = if (selected) Cyan else Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
     }
 }
 
