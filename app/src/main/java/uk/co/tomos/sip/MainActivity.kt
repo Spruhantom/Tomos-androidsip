@@ -6,6 +6,8 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import android.os.Bundle
@@ -26,18 +28,65 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import org.linphone.core.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import java.net.HttpURLConnection
+import java.net.URL
 
 private val Void = Color(0xFF090A12)
 private val Panel = Color(0xFF151725)
 private val Pink = Color(0xFFFF2D9B)
 private val Cyan = Color(0xFF20E7F5)
 private val Muted = Color(0xFF9BA3B8)
+
+private data class GitHubUpdate(val buildCode: Int, val releaseName: String, val releaseUrl: String)
+
+private suspend fun fetchGitHubUpdate(): GitHubUpdate? = withContext(Dispatchers.IO) {
+    val connection = (URL("https://api.github.com/repos/Spruhantom/Tomos-androidsip/releases?per_page=10").openConnection() as HttpURLConnection)
+    try {
+        connection.connectTimeout = 10_000
+        connection.readTimeout = 10_000
+        connection.requestMethod = "GET"
+        connection.setRequestProperty("Accept", "application/vnd.github+json")
+        connection.setRequestProperty("User-Agent", "TomOS-SIP-Android")
+        if (connection.responseCode !in 200..299) {
+            throw IllegalStateException("GitHub returned HTTP ${connection.responseCode}")
+        }
+        val releases = JSONArray(connection.inputStream.bufferedReader().use { it.readText() })
+        val currentCode = BuildConfig.VERSION_CODE
+        var newest: GitHubUpdate? = null
+        for (index in 0 until releases.length()) {
+            val release = releases.getJSONObject(index)
+            if (release.optBoolean("draft", true)) continue
+            val assets = release.optJSONArray("assets") ?: continue
+            val hasApk = (0 until assets.length()).any { assetIndex ->
+                assets.getJSONObject(assetIndex).optString("name").endsWith(".apk", ignoreCase = true)
+            }
+            if (!hasApk) continue
+            val tag = release.optString("tag_name")
+            val buildCode = Regex("-build-(\\d+)$").find(tag)?.groupValues?.getOrNull(1)?.toIntOrNull()
+                ?: continue
+            if (buildCode > currentCode && (newest == null || buildCode > newest!!.buildCode)) {
+                newest = GitHubUpdate(
+                    buildCode,
+                    release.optString("name").ifBlank { tag },
+                    release.optString("html_url")
+                )
+            }
+        }
+        newest
+    } finally {
+        connection.disconnect()
+    }
+}
 
 class MainActivity : ComponentActivity() {
     private var sip: TomSipEngine? = null
@@ -202,6 +251,20 @@ class TomSipEngine(context: android.content.Context) {
 
 @Composable
 private fun TomSipScreen(engine: TomSipEngine) {
+    val context = LocalContext.current
+    var updateMessage by remember { mutableStateOf("Checking GitHub releases…") }
+    var availableUpdate by remember { mutableStateOf<GitHubUpdate?>(null) }
+    var updateCheckKey by remember { mutableIntStateOf(0) }
+    LaunchedEffect(updateCheckKey) {
+        updateMessage = "Checking GitHub releases…"
+        try {
+            availableUpdate = fetchGitHubUpdate()
+            updateMessage = if (availableUpdate == null) "You're running the latest published version." else "A newer version is available: ${availableUpdate!!.releaseName}"
+        } catch (error: Exception) {
+            availableUpdate = null
+            updateMessage = "Couldn't check GitHub: ${error.message ?: "network error"}"
+        }
+    }
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var domain by remember { mutableStateOf("") }
@@ -238,6 +301,30 @@ private fun TomSipScreen(engine: TomSipEngine) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("Your calls.", color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.Bold)
                 Text("Your network. Your control.", color = Pink, fontSize = 17.sp)
+            }
+            Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(20.dp)) {
+                Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("APP UPDATES", color = Cyan, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+                        Spacer(Modifier.weight(1f))
+                        Text("v${BuildConfig.VERSION_NAME}", color = Muted, fontSize = 11.sp)
+                    }
+                    Text(updateMessage, color = Color.White, fontSize = 13.sp)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { updateCheckKey++ }, modifier = Modifier.weight(1f)) {
+                            Text("CHECK AGAIN")
+                        }
+                        if (availableUpdate != null) {
+                            Button(
+                                onClick = {
+                                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(availableUpdate!!.releaseUrl)))
+                                },
+                                modifier = Modifier.weight(1f),
+                                colors = ButtonDefaults.buttonColors(containerColor = Pink)
+                            ) { Text("DOWNLOAD UPDATE") }
+                        }
+                    }
+                }
             }
             Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(20.dp)) {
                 Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
