@@ -36,7 +36,7 @@ class TomosSipForegroundService : Service() {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         }
         val notification: Notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.drawable.tomos_logo)
+            .setSmallIcon(R.drawable.ic_tomos_sip)
             .setContentTitle("TomOS SIP")
             .setContentText("SIP service is running")
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
