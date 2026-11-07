@@ -24,6 +24,9 @@ internal object CallHistoryLogic {
         return ((endedAtElapsedMillis - connectedAtElapsedMillis) / 1000L).coerceAtLeast(0L)
     }
 
+    fun delete(records: List<SipCallRecord>, id: String): List<SipCallRecord> =
+        records.filterNot { it.id == id }
+
     fun migrateLegacy(lines: List<String>): List<SipCallRecord> =
         lines.filter { it.isNotBlank() }.mapIndexed { index, line ->
             val peer = line.substringBefore(" • ")
