@@ -36,7 +36,7 @@ class TomosBackupCodecTest {
     }
 
     @Test fun rejectsDuplicateContactIds() {
-        val json = TomosBackupCodec.encode(listOf(contact, contact), emptyList())
+        val json = """{"schemaVersion":1,"createdAt":1,"contacts":[{"id":"contact-1","name":"Alice","number":"1001"},{"id":"contact-1","name":"Alice","number":"1001"}],"callHistory":[]}"""
         assertThrows(IllegalArgumentException::class.java) { TomosBackupCodec.decode(json) }
     }
 
