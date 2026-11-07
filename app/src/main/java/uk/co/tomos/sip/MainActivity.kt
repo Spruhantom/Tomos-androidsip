@@ -2,6 +2,13 @@ package uk.co.tomos.sip
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.Context
+import android.media.AudioManager
+import android.os.Build
+import androidx.core.app.NotificationCompat
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -55,6 +62,21 @@ class TomSipEngine(context: android.content.Context) {
         private set
     var registered by mutableStateOf(false)
         private set
+    var incomingCaller by mutableStateOf<String?>(null)
+        private set
+    var muted by mutableStateOf(false)
+        private set
+    var held by mutableStateOf(false)
+        private set
+    var speaker by mutableStateOf(false)
+        private set
+    private val prefs = context.getSharedPreferences("tomos_sip", 0)
+    var history by mutableStateOf(prefs.getString("history", "")!!.lines().filter { it.isNotBlank() })
+        private set
+    var contacts by mutableStateOf(prefs.getString("contacts", "")!!.lines().filter { it.isNotBlank() })
+        private set
+    private val appContext = context
+    private val audio = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
     init {
         core.addListener(object : CoreListenerStub() {
@@ -69,6 +91,16 @@ class TomSipEngine(context: android.content.Context) {
                 }
             }
             override fun onCallStateChanged(core: Core, call: Call, state: Call.State, message: String) {
+                if (state == Call.State.IncomingReceived || state == Call.State.IncomingEarlyMedia) {
+                    incomingCaller = call.remoteAddress?.username ?: "Unknown caller"
+                    postIncomingNotification(incomingCaller ?: "Incoming call")
+                }
+                if (state == Call.State.Connected || state == Call.State.StreamsRunning) incomingCaller = null
+                if (state == Call.State.End || state == Call.State.Released || state == Call.State.Error) {
+                    incomingCaller = null
+                    history = (listOf((call.remoteAddress?.username ?: "Unknown") + " • " + state.name) + history).take(50)
+                    prefs.edit().putString("history", history.joinToString("\n")).apply()
+                }
                 callStatus = when (state) {
                     Call.State.OutgoingInit, Call.State.OutgoingProgress -> "Calling…"
                     Call.State.OutgoingRinging -> "Ringing…"
@@ -122,6 +154,27 @@ class TomSipEngine(context: android.content.Context) {
         } catch (e: Exception) { callStatus = e.message ?: "Call failed" }
     }
 
+    private fun postIncomingNotification(caller: String) {
+        val manager = appContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        if (Build.VERSION.SDK_INT >= 26) manager.createNotificationChannel(NotificationChannel("incoming_calls", "Incoming calls", NotificationManager.IMPORTANCE_HIGH))
+        val intent = appContext.packageManager.getLaunchIntentForPackage(appContext.packageName)
+        val pending = intent?.let { PendingIntent.getActivity(appContext, 0, it, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE) }
+        val notification = NotificationCompat.Builder(appContext, "incoming_calls")
+            .setSmallIcon(android.R.drawable.sym_call_incoming).setContentTitle("TomOS SIP • Incoming call")
+            .setContentText(caller).setCategory(NotificationCompat.CATEGORY_CALL)
+            .setPriority(NotificationCompat.PRIORITY_MAX).setAutoCancel(true).setContentIntent(pending).build()
+        manager.notify(1001, notification)
+    }
+    fun accept() { core.currentCall?.accept(); incomingCaller = null }
+    fun decline() { core.currentCall?.decline(Reason.Declined); incomingCaller = null }
+    fun toggleMute() { muted = !muted; core.isMicEnabled = !muted }
+    fun toggleHold() { val call = core.currentCall ?: return; if (held) call.resume() else call.pause(); held = !held }
+    fun toggleSpeaker() { speaker = !speaker; audio.mode = AudioManager.MODE_IN_COMMUNICATION; @Suppress("DEPRECATION") run { audio.isSpeakerphoneOn = speaker } }
+    fun addContact(name: String, number: String) {
+        if (name.isBlank() || number.isBlank()) return
+        contacts = (contacts + "$name • $number").distinct()
+        prefs.edit().putString("contacts", contacts.joinToString("\n")).apply()
+    }
     fun hangup() { core.currentCall?.terminate(); callStatus = "Call ended" }
     fun shutdown() { try { core.stop() } catch (_: Exception) { } }
 }
@@ -134,6 +187,8 @@ private fun TomSipScreen(engine: TomSipEngine) {
     var transport by remember { mutableStateOf("UDP") }
     var destination by remember { mutableStateOf("") }
     var showSettings by remember { mutableStateOf(true) }
+    var contactName by remember { mutableStateOf("") }
+    var contactNumber by remember { mutableStateOf("") }
 
     MaterialTheme(colorScheme = darkColorScheme(
         primary = Pink, secondary = Cyan, background = Void, surface = Panel,
