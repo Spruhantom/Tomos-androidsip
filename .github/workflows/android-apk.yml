@@ -28,6 +28,14 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      # Keep the debug signing identity stable for successive main-branch APK releases.
+      # Existing APKs built before this cache was introduced may still require one reinstall.
+      - name: Restore persistent Android debug signing key
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: tomos-android-debug-keystore-v1-${{ github.ref == 'refs/heads/main' && 'main' || github.ref }}
+
       - name: Build debug APK
         run: gradle --no-daemon --stacktrace -PversionCode="${GITHUB_RUN_NUMBER}" assembleDebug
 
