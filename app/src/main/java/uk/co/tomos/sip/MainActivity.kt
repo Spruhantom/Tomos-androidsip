@@ -976,6 +976,9 @@ private fun TomSipScreen(engine: TomSipEngine) {
     var availableUpdate by remember { mutableStateOf<GitHubUpdate?>(null) }
     var updateCheckKey by remember { mutableIntStateOf(0) }
     var backupMessage by remember { mutableStateOf("Create a password-protected backup before reinstalling.") }
+    var premiumCode by remember { mutableStateOf("") }
+    var premiumMessage by remember { mutableStateOf("Free edition. Activate a lifetime Premium code to unlock the Premium tools.") }
+    var premiumBusy by remember { mutableStateOf(false) }
     var showExportPasswordDialog by remember { mutableStateOf(false) }
     var exportPassword by remember { mutableStateOf("") }
     var exportPasswordConfirm by remember { mutableStateOf("") }
@@ -1066,8 +1069,8 @@ private fun TomSipScreen(engine: TomSipEngine) {
     var editingContactId by remember { mutableStateOf<String?>(null) }
     var contactError by remember { mutableStateOf<String?>(null) }
     var selectedTab by remember { mutableStateOf("Dialler") }
-    val tabs = listOf("Dialler", "Contacts", "History", "Settings")
-    val tabSymbols = mapOf("Dialler" to "☎", "Contacts" to "♙", "History" to "◷", "Settings" to "⚙")
+    val tabs = listOf("Dialler", "Contacts", "History", "Settings", "Premium")
+    val tabSymbols = mapOf("Dialler" to "☎", "Contacts" to "♙", "History" to "◷", "Settings" to "⚙", "Premium" to "★")
     var elapsedCallSeconds by remember { mutableIntStateOf(0) }
     LaunchedEffect(engine.callStartedAtMillis, engine.activeCall) {
         while (engine.activeCall && engine.callStartedAtMillis > 0L) {
@@ -1228,6 +1231,53 @@ private fun TomSipScreen(engine: TomSipEngine) {
                 Text("Your calls.", color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.Bold)
                 Text("Your network. Your control.", color = Pink, fontSize = 17.sp)
             }
+            }
+            if (selectedTab == "Premium") {
+                Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(20.dp)) {
+                    Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text("TOMOS SIP PREMIUM", color = Cyan, fontSize = 14.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+                        Text("One-time lifetime licence", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                        Text("Premium includes multiple SIP accounts, advanced codec controls and encrypted backups. Core SIP calling remains free.", color = Muted, fontSize = 12.sp)
+                        Text(premiumMessage, color = Color.White, fontSize = 12.sp)
+                        OutlinedTextField(
+                            value = premiumCode,
+                            onValueChange = { premiumCode = it.uppercase().take(64) },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("Lifetime activation code") },
+                            singleLine = true,
+                            colors = fieldColors()
+                        )
+                        Button(
+                            onClick = {
+                                if (BuildConfig.TOMOS_PREMIUM_API_URL.isBlank() || BuildConfig.TOMOS_PREMIUM_PUBLIC_KEY.isBlank()) {
+                                    premiumMessage = "Premium activation is not configured in this build yet."
+                                } else {
+                                    premiumBusy = true
+                                    updateScope.launch {
+                                        val client = PremiumActivationClient(
+                                            context,
+                                            BuildConfig.TOMOS_PREMIUM_API_URL,
+                                            PremiumLicenceVerifier(BuildConfig.TOMOS_PREMIUM_PUBLIC_KEY)
+                                        )
+                                        val result = client.redeem(premiumCode)
+                                        premiumMessage = result.fold(
+                                            { "Premium lifetime licence activated and verified." },
+                                            { "Activation failed: ${it.message ?: "please try again"}" }
+                                        )
+                                        if (result.isSuccess) premiumCode = ""
+                                        premiumBusy = false
+                                    }
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = !premiumBusy && premiumCode.isNotBlank(),
+                            colors = ButtonDefaults.buttonColors(containerColor = Cyan, contentColor = Void)
+                        ) {
+                            Text(if (premiumBusy) "VERIFYING…" else "ACTIVATE PREMIUM")
+                        }
+                        Text("Activation requires an internet connection. Your signed licence is verified on this device and stored encrypted with the Android Keystore.", color = Muted, fontSize = 11.sp)
+                    }
+                }
             }
             if (selectedTab == "Settings") {
             Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(20.dp)) {
