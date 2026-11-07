@@ -277,7 +277,7 @@ class TomSipEngine(context: android.content.Context) {
         return prefs.getString("history", "").orEmpty().lines().filter { it.isNotBlank() }
             .mapIndexed { index, line ->
                 val peer = line.substringBefore(" • ")
-                SipCallRecord("legacy-$index", peer, peer, "Unknown", line.substringAfter(" • ", "Previous call"), "", 0L, 0L)
+                SipCallRecord("legacy-$index", peer, peer, "Unknown", line.substringAfter(" • ", "Previous call"), 0L, 0L)
             }
     }
 
