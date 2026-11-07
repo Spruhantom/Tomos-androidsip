@@ -33,6 +33,19 @@ Use this checklist with a test PBX and non-production SIP accounts. Record the d
 - [ ] End calls from the app and confirm the call screen closes.
 - [ ] Confirm call history receives an entry.
 
+## Contacts and caller ID
+
+- [ ] Confirm existing contacts are retained after upgrading from a build that used the original plain-text contact list.
+- [ ] Add a contact with a name and SIP extension.
+- [ ] Try saving a contact with a blank name or number and confirm a useful validation message appears.
+- [ ] Try saving a duplicate extension with different punctuation or a SIP URI and confirm it is rejected.
+- [ ] Search contacts by name and by number.
+- [ ] Edit a contact and confirm the change persists after restarting the app.
+- [ ] Delete a contact and confirm it remains deleted after restarting the app.
+- [ ] Place a call from a saved contact.
+- [ ] Receive a call from a saved extension and confirm the saved contact name appears on the incoming-call screen and notification.
+- [ ] Receive a call from an unknown extension and confirm the PBX display name or SIP username is used as the fallback.
+
 ## Audio and media
 
 - [ ] Verify two-way audio on a normal call.
