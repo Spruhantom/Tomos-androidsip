@@ -277,14 +277,38 @@ private fun TomSipScreen(engine: TomSipEngine) {
     var expirySeconds by remember { mutableStateOf("3600") }
     var contactName by remember { mutableStateOf("") }
     var contactNumber by remember { mutableStateOf("") }
+    var selectedTab by remember { mutableStateOf("Dialler") }
+    val tabs = listOf("Dialler", "Contacts", "History", "Settings")
+    val tabSymbols = mapOf("Dialler" to "☎", "Contacts" to "♙", "History" to "◷", "Settings" to "⚙")
 
     MaterialTheme(colorScheme = darkColorScheme(
         primary = Pink, secondary = Cyan, background = Void, surface = Panel,
         onPrimary = Color.White, onBackground = Color.White, onSurface = Color.White
     )) {
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            containerColor = Void,
+            bottomBar = {
+                NavigationBar(containerColor = Panel, contentColor = Color.White) {
+                    tabs.forEach { tab ->
+                        NavigationBarItem(
+                            selected = selectedTab == tab,
+                            onClick = { selectedTab = tab },
+                            icon = { Text(tabSymbols[tab] ?: "•", fontSize = 19.sp) },
+                            label = { Text(tab) },
+                            colors = NavigationBarItemDefaults.colors(
+                                selectedIconColor = Cyan, selectedTextColor = Cyan,
+                                indicatorColor = Color(0xFF303044),
+                                unselectedIconColor = Muted, unselectedTextColor = Muted
+                            )
+                        )
+                    }
+                }
+            }
+        ) { innerPadding ->
         Column(
             Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0xFF111426), Void, Color(0xFF090A12))))
-                .verticalScroll(rememberScrollState()).padding(22.dp),
+                .padding(innerPadding).verticalScroll(rememberScrollState()).padding(22.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -298,10 +322,13 @@ private fun TomSipScreen(engine: TomSipEngine) {
                 Spacer(Modifier.weight(1f))
                 Text("v0.1.0", color = Muted, fontSize = 11.sp)
             }
+            if (selectedTab == "Dialler") {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("Your calls.", color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.Bold)
                 Text("Your network. Your control.", color = Pink, fontSize = 17.sp)
             }
+            }
+            if (selectedTab == "Settings") {
             Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(20.dp)) {
                 Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -326,6 +353,7 @@ private fun TomSipScreen(engine: TomSipEngine) {
                     }
                 }
             }
+            }
             Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(20.dp)) {
                 Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -338,6 +366,7 @@ private fun TomSipScreen(engine: TomSipEngine) {
                     Text(engine.status, color = Color.White, fontSize = 15.sp)
                 }
             }
+            if (selectedTab == "Dialler") {
             Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(20.dp)) {
                 Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -377,7 +406,8 @@ private fun TomSipScreen(engine: TomSipEngine) {
                 }
             }
             if (engine.incomingCaller != null) {
-                Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF252039)), shape = RoundedCornerShape(20.dp)) {
+                }
+            Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF252039)), shape = RoundedCornerShape(20.dp)) {
                     Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text("INCOMING CALL", color = Cyan, fontWeight = FontWeight.Bold)
                         Text(engine.incomingCaller ?: "", color = Color.White, fontSize = 20.sp)
@@ -388,6 +418,7 @@ private fun TomSipScreen(engine: TomSipEngine) {
                     }
                 }
             }
+            if (selectedTab == "Contacts") {
             Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(20.dp)) {
                 Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("CONTACTS", color = Cyan, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
@@ -402,6 +433,8 @@ private fun TomSipScreen(engine: TomSipEngine) {
                     }
                 }
             }
+            }
+            if (selectedTab == "History") {
             Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(20.dp)) {
                 Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("RECENT CALLS", color = Cyan, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
@@ -409,6 +442,8 @@ private fun TomSipScreen(engine: TomSipEngine) {
                     engine.history.take(10).forEach { Text(it, color = Color.White, fontSize = 13.sp) }
                 }
             }
+            }
+            if (selectedTab == "Settings") {
             Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(20.dp)) {
                 Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -446,7 +481,9 @@ private fun TomSipScreen(engine: TomSipEngine) {
                     }
                 }
             }
+            }
             Text("TOM OS  •  NEON PUNK EDITION", Modifier.fillMaxWidth(), color = Muted, fontSize = 10.sp, letterSpacing = 1.6.sp)
+        }
         }
     }
 }
