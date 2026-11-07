@@ -56,6 +56,13 @@ private val Muted = Color(0xFF9BA3B8)
 private data class GitHubUpdate(val buildCode: Int, val releaseName: String, val apkUrl: String)
 
 data class AudioCodecOption(val id: String, val label: String, val details: String, val enabled: Boolean)
+data class SipContact(val id: String, val name: String, val number: String)
+
+private fun normalizeSipIdentity(value: String): String {
+    val withoutScheme = value.trim().removePrefix("sip:").removePrefix("sips:")
+    val userPart = withoutScheme.substringBefore("@").substringBefore(";")
+    return userPart.filter { it.isLetterOrDigit() || it == '+' }.lowercase()
+}
 
 private suspend fun fetchGitHubUpdate(): GitHubUpdate? = withContext(Dispatchers.IO) {
     val connection = (URL("https://api.github.com/repos/Spruhantom/Tomos-androidsip/releases?per_page=10").openConnection() as HttpURLConnection)
@@ -198,8 +205,59 @@ class TomSipEngine(context: android.content.Context) {
     private val prefs = context.getSharedPreferences("tomos_sip", 0)
     var history by mutableStateOf(prefs.getString("history", "")!!.lines().filter { it.isNotBlank() })
         private set
-    var contacts by mutableStateOf(prefs.getString("contacts", "")!!.lines().filter { it.isNotBlank() })
+    var contacts by mutableStateOf(loadContacts())
         private set
+
+    private fun loadContacts(): List<SipContact> {
+        val structured = prefs.getString("contacts_v2", null)
+        if (structured != null) return try {
+            val json = JSONArray(structured)
+            (0 until json.length()).mapNotNull { index ->
+                val item = json.optJSONObject(index) ?: return@mapNotNull null
+                val name = item.optString("name").trim()
+                val number = item.optString("number").trim()
+                if (name.isBlank() || number.isBlank()) null else SipContact(
+                    item.optString("id").ifBlank { java.util.UUID.randomUUID().toString() }, name, number
+                )
+            }
+        } catch (_: Exception) { emptyList() }
+        return prefs.getString("contacts", "").orEmpty().lines().mapNotNull { line ->
+            if (line.isBlank()) return@mapNotNull null
+            val name = line.substringBefore(" • ").trim()
+            val number = line.substringAfter(" • ", "").trim()
+            if (name.isBlank() || number.isBlank()) null else SipContact(java.util.UUID.randomUUID().toString(), name, number)
+        }
+    }
+
+    private fun persistContacts(updated: List<SipContact>) {
+        val json = JSONArray()
+        updated.forEach { contact -> json.put(org.json.JSONObject().put("id", contact.id).put("name", contact.name).put("number", contact.number)) }
+        prefs.edit().putString("contacts_v2", json.toString()).apply()
+        contacts = updated
+    }
+
+    fun resolveCallerName(username: String?, displayName: String?): String {
+        val identity = username?.let(::normalizeSipIdentity).orEmpty()
+        val match = contacts.firstOrNull { identity.isNotBlank() && normalizeSipIdentity(it.number) == identity }
+        return match?.name ?: displayName?.takeIf { it.isNotBlank() } ?: username?.takeIf { it.isNotBlank() } ?: "Unknown caller"
+    }
+
+    fun saveContact(id: String?, name: String, number: String): String? {
+        val cleanName = name.trim()
+        val cleanNumber = number.trim()
+        if (cleanName.isBlank() || cleanNumber.isBlank()) return "Enter a contact name and SIP number."
+        val normalized = normalizeSipIdentity(cleanNumber)
+        if (normalized.isBlank()) return "Enter a valid extension, phone number or SIP address."
+        if (contacts.any { it.id != id && normalizeSipIdentity(it.number) == normalized }) return "A contact with this number already exists."
+        val updated = contacts.toMutableList()
+        val index = updated.indexOfFirst { it.id == id }
+        val contact = SipContact(id ?: java.util.UUID.randomUUID().toString(), cleanName, cleanNumber)
+        if (index >= 0) updated[index] = contact else updated.add(contact)
+        persistContacts(updated.sortedBy { it.name.lowercase() })
+        return null
+    }
+
+    fun deleteContact(id: String) = persistContacts(contacts.filterNot { it.id == id })
     private val appContext = context
 
     init {
@@ -216,9 +274,7 @@ class TomSipEngine(context: android.content.Context) {
                 updateStatusNotification()
             }
             override fun onCallStateChanged(core: Core, call: Call, state: Call.State, message: String) {
-                val remoteName = call.remoteAddress?.displayName?.takeIf { it.isNotBlank() }
-                    ?: call.remoteAddress?.username?.takeIf { it.isNotBlank() }
-                    ?: "Unknown caller"
+                val remoteName = resolveCallerName(call.remoteAddress?.username, call.remoteAddress?.displayName)
                 if (state == Call.State.IncomingReceived || state == Call.State.IncomingEarlyMedia) {
                     incomingCaller = remoteName
                     activeCallName = remoteName
@@ -468,11 +524,6 @@ class TomSipEngine(context: android.content.Context) {
     fun toggleMute() { muted = !muted; core.setMicEnabled(!muted) }
     fun toggleHold() { val call = core.currentCall ?: return; if (held) call.resume() else call.pause(); held = !held }
     fun toggleSpeaker() { speaker = !speaker; val target = if (speaker) AudioDevice.Type.Speaker else AudioDevice.Type.Earpiece; core.setOutputAudioDevice(core.audioDevices.firstOrNull { it.type == target }) }
-    fun addContact(name: String, number: String) {
-        if (name.isBlank() || number.isBlank()) return
-        contacts = (contacts + "$name • $number").distinct()
-        prefs.edit().putString("contacts", contacts.joinToString("\n")).apply()
-    }
     fun hangup() { core.currentCall?.terminate(); callStatus = "Call ended" }
     fun shutdown() {
         try {
@@ -513,6 +564,9 @@ private fun TomSipScreen(engine: TomSipEngine) {
     var expirySeconds by remember { mutableStateOf("3600") }
     var contactName by remember { mutableStateOf("") }
     var contactNumber by remember { mutableStateOf("") }
+    var contactSearch by remember { mutableStateOf("") }
+    var editingContactId by remember { mutableStateOf<String?>(null) }
+    var contactError by remember { mutableStateOf<String?>(null) }
     var selectedTab by remember { mutableStateOf("Dialler") }
     val tabs = listOf("Dialler", "Contacts", "History", "Settings")
     val tabSymbols = mapOf("Dialler" to "☎", "Contacts" to "♙", "History" to "◷", "Settings" to "⚙")
@@ -699,14 +753,37 @@ private fun TomSipScreen(engine: TomSipEngine) {
             if (selectedTab == "Contacts") {
             Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(20.dp)) {
                 Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("CONTACTS", color = Cyan, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
-                    OutlinedTextField(contactName, { contactName = it }, Modifier.fillMaxWidth(), label = { Text("Contact name") }, singleLine = true, colors = fieldColors())
-                    OutlinedTextField(contactNumber, { contactNumber = it }, Modifier.fillMaxWidth(), label = { Text("Extension / SIP number") }, singleLine = true, colors = fieldColors())
-                    Button(onClick = { engine.addContact(contactName, contactNumber); contactName = ""; contactNumber = "" }, Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Pink)) { Text("SAVE CONTACT") }
-                    engine.contacts.forEach { entry ->
-                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                            Text(entry, Modifier.weight(1f), color = Color.White)
-                            TextButton(onClick = { engine.call(entry.substringAfter("•").trim()) }) { Text("CALL", color = Cyan) }
+                    Text("CONTACTS & CALLER ID", color = Cyan, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+                    Text("Saved names are matched to incoming SIP usernames and extensions.", color = Muted, fontSize = 12.sp)
+                    OutlinedTextField(contactSearch, { contactSearch = it }, Modifier.fillMaxWidth(), label = { Text("Search contacts") }, singleLine = true, colors = fieldColors())
+                    Divider(color = Color(0xFF3A4054))
+                    Text(if (editingContactId == null) "ADD CONTACT" else "EDIT CONTACT", color = Pink, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                    OutlinedTextField(contactName, { contactName = it; contactError = null }, Modifier.fillMaxWidth(), label = { Text("Contact name") }, singleLine = true, colors = fieldColors())
+                    OutlinedTextField(contactNumber, { contactNumber = it; contactError = null }, Modifier.fillMaxWidth(), label = { Text("Extension, phone number or SIP address") }, singleLine = true, colors = fieldColors())
+                    if (contactError != null) Text(contactError!!, color = Pink, fontSize = 12.sp)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = {
+                            val error = engine.saveContact(editingContactId, contactName, contactNumber)
+                            contactError = error
+                            if (error == null) { contactName = ""; contactNumber = ""; editingContactId = null }
+                        }, Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = Pink)) { Text(if (editingContactId == null) "SAVE CONTACT" else "UPDATE CONTACT") }
+                        if (editingContactId != null) OutlinedButton(onClick = { contactName = ""; contactNumber = ""; editingContactId = null; contactError = null }) { Text("CANCEL") }
+                    }
+                    Divider(color = Color(0xFF3A4054))
+                    val filteredContacts = engine.contacts.filter { it.name.contains(contactSearch, ignoreCase = true) || it.number.contains(contactSearch, ignoreCase = true) }
+                    Text(filteredContacts.size.toString() + " CONTACTS", color = Muted, fontSize = 10.sp, letterSpacing = 1.sp)
+                    if (filteredContacts.isEmpty()) Text("No matching contacts", color = Muted, fontSize = 13.sp)
+                    filteredContacts.forEach { contact ->
+                        Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.size(38.dp).background(Color(0xFF252039), RoundedCornerShape(19.dp)), contentAlignment = Alignment.Center) { Text(contact.name.take(1).uppercase(), color = Cyan, fontWeight = FontWeight.Bold) }
+                            Spacer(Modifier.width(10.dp))
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(contact.name, color = Color.White, fontWeight = FontWeight.SemiBold)
+                                Text(contact.number, color = Muted, fontSize = 11.sp)
+                            }
+                            TextButton(onClick = { engine.call(contact.number) }) { Text("CALL", color = Cyan) }
+                            TextButton(onClick = { editingContactId = contact.id; contactName = contact.name; contactNumber = contact.number; contactError = null }) { Text("EDIT", color = Pink) }
+                            TextButton(onClick = { engine.deleteContact(contact.id); if (editingContactId == contact.id) { editingContactId = null; contactName = ""; contactNumber = "" } }) { Text("DELETE", color = Pink) }
                         }
                     }
                 }
