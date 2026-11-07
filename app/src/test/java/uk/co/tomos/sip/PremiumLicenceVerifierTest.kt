@@ -42,11 +42,14 @@ class PremiumLicenceVerifierTest {
             .put("payload", JSONObject(canonical))
         val verifier = PremiumLicenceVerifier(publicPem)
         assertTrue(verifier.verify(document, code))
+        // A persisted licence can be re-verified after restart without retaining the activation code.
+        assertTrue(verifier.verifyStored(document))
 
         val alteredMirror = JSONObject(document.toString()).apply {
             put("payload", JSONObject(canonical).put("customer_reference", "tampered"))
         }
         assertFalse(verifier.verify(alteredMirror, code))
+        assertFalse(verifier.verifyStored(alteredMirror))
         assertFalse(verifier.verify(document, code + "!"))
         assertFalse(verifier.verify(document, code + "é"))
         assertFalse(verifier.verify(document, code.replace("-", "")))
