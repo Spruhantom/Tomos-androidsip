@@ -129,12 +129,19 @@ private suspend fun downloadUpdateApk(context: Context, update: GitHubUpdate): F
     }
 }
 
+private const val ACTION_ANSWER_CALL = "uk.co.tomos.sip.action.ANSWER_CALL"
+private const val ACTION_DECLINE_CALL = "uk.co.tomos.sip.action.DECLINE_CALL"
+
 class MainActivity : ComponentActivity() {
     private var sip: TomSipEngine? = null
     private val permissionRequest = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
     private val notificationPermissionRequest = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            setShowWhenLocked(true)
+            setTurnScreenOn(true)
+        }
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             permissionRequest.launch(Manifest.permission.RECORD_AUDIO)
         }
@@ -142,8 +149,23 @@ class MainActivity : ComponentActivity() {
             notificationPermissionRequest.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
         sip = TomSipEngine(applicationContext)
+        handleCallAction(intent)
         setContent { TomSipScreen(sip!!) }
     }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleCallAction(intent)
+    }
+
+    private fun handleCallAction(intent: Intent?) {
+        when (intent?.action) {
+            ACTION_ANSWER_CALL -> sip?.accept()
+            ACTION_DECLINE_CALL -> sip?.decline()
+        }
+    }
+
     override fun onDestroy() { sip?.shutdown(); sip = null; super.onDestroy() }
 }
 
@@ -215,6 +237,7 @@ class TomSipEngine(context: android.content.Context) {
                 if (state == Call.State.Paused) activeCall = true
                 if (state == Call.State.End || state == Call.State.Released || state == Call.State.Error) {
                     incomingCaller = null
+                    notificationManager().cancel(1001)
                     activeCall = false
                     callStartedAtMillis = 0L
                     history = (listOf((call.remoteAddress?.username ?: "Unknown") + " • " + state.name) + history).take(50)
@@ -383,18 +406,65 @@ class TomSipEngine(context: android.content.Context) {
         manager.notify(1002, notification)
     }
 
+    private fun callActionPendingIntent(action: String, requestCode: Int): PendingIntent {
+        val intent = Intent(appContext, MainActivity::class.java).apply {
+            this.action = action
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        return PendingIntent.getActivity(
+            appContext, requestCode, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+    }
+
     private fun postIncomingNotification(caller: String) {
         if (!canPostNotifications()) return
         val manager = notificationManager()
-        if (Build.VERSION.SDK_INT >= 26) manager.createNotificationChannel(NotificationChannel("incoming_calls", "Incoming calls", NotificationManager.IMPORTANCE_HIGH))
+        if (Build.VERSION.SDK_INT >= 26) {
+            manager.createNotificationChannel(
+                NotificationChannel("incoming_calls", "Incoming calls", NotificationManager.IMPORTANCE_HIGH).apply {
+                    description = "Alerts for incoming TomOS SIP calls"
+                    lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
+                    enableVibration(true)
+                }
+            )
+        }
+        val answerIntent = callActionPendingIntent(ACTION_ANSWER_CALL, 1101)
+        val declineIntent = callActionPendingIntent(ACTION_DECLINE_CALL, 1102)
+        val fullScreenIntent = appContext.packageManager.getLaunchIntentForPackage(appContext.packageName)?.let { launch ->
+            launch.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            PendingIntent.getActivity(
+                appContext, 1100, launch,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+        }
         val notification = NotificationCompat.Builder(appContext, "incoming_calls")
-            .setSmallIcon(android.R.drawable.sym_call_incoming).setContentTitle("TomOS SIP • Incoming call")
-            .setContentText(caller).setCategory(NotificationCompat.CATEGORY_CALL)
-            .setPriority(NotificationCompat.PRIORITY_MAX).setAutoCancel(true).setContentIntent(appPendingIntent()).build()
+            .setSmallIcon(android.R.drawable.sym_call_incoming)
+            .setContentTitle("TomOS SIP • Incoming call")
+            .setContentText(caller)
+            .setCategory(NotificationCompat.CATEGORY_CALL)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setOngoing(true)
+            .setAutoCancel(false)
+            .setTimeoutAfter(60_000L)
+            .setContentIntent(fullScreenIntent)
+            .setFullScreenIntent(fullScreenIntent, true)
+            .addAction(android.R.drawable.sym_action_call, "Answer", answerIntent)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Decline", declineIntent)
+            .build()
         manager.notify(1001, notification)
     }
-    fun accept() { core.currentCall?.accept(); incomingCaller = null }
-    fun decline() { core.currentCall?.decline(Reason.Declined); incomingCaller = null }
+    fun accept() {
+        notificationManager().cancel(1001)
+        core.currentCall?.accept()
+        incomingCaller = null
+    }
+    fun decline() {
+        notificationManager().cancel(1001)
+        core.currentCall?.decline(Reason.Declined)
+        incomingCaller = null
+    }
     fun toggleMute() { muted = !muted; core.setMicEnabled(!muted) }
     fun toggleHold() { val call = core.currentCall ?: return; if (held) call.resume() else call.pause(); held = !held }
     fun toggleSpeaker() { speaker = !speaker; val target = if (speaker) AudioDevice.Type.Speaker else AudioDevice.Type.Earpiece; core.setOutputAudioDevice(core.audioDevices.firstOrNull { it.type == target }) }
