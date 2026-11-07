@@ -1018,31 +1018,31 @@ private fun TomSipScreen(engine: TomSipEngine) {
         if (!engine.activeCall) elapsedCallSeconds = 0
     }
 
-    if (pendingBackup != null) {
-        val backup = pendingBackup!!
-        AlertDialog(
-            onDismissRequest = { pendingBackup = null },
-            title = { Text("Restore TomOS backup?") },
-            text = { Text("This will replace ${engine.contacts.size} contacts and ${engine.history.size} call records with ${backup.contacts?.size ?: 0} contacts and ${backup.callHistory?.size ?: 0} call records from this backup. SIP accounts and passwords are not included or changed.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    try {
-                        engine.restoreBackup(backup)
-                        backupMessage = "Restore complete. Contacts and call history have been restored."
-                    } catch (error: Exception) {
-                        backupMessage = "Restore failed: ${error.message ?: "could not apply backup"}"
-                    }
-                    pendingBackup = null
-                }) { Text("RESTORE", color = Pink) }
-            },
-            dismissButton = { TextButton(onClick = { pendingBackup = null }) { Text("CANCEL") } }
-        )
-    }
     MaterialTheme(colorScheme = darkColorScheme(
         primary = Pink, secondary = Cyan, background = Void, surface = Panel,
         onPrimary = Color.White, onBackground = Color.White, onSurface = Color.White
     )) {
-        Scaffold(
+        if (pendingBackup != null) {
+            val backup = pendingBackup!!
+            AlertDialog(
+                onDismissRequest = { pendingBackup = null },
+                title = { Text("Restore TomOS backup?") },
+                text = { Text("This will replace ${engine.contacts.size} contacts and ${engine.history.size} call records with ${backup.contacts?.size ?: 0} contacts and ${backup.callHistory?.size ?: 0} call records from this backup. SIP accounts and passwords are not included or changed.") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        try {
+                            engine.restoreBackup(backup)
+                            backupMessage = "Restore complete. Contacts and call history have been restored."
+                        } catch (error: Exception) {
+                            backupMessage = "Restore failed: ${error.message ?: "could not apply backup"}"
+                        }
+                        pendingBackup = null
+                    }) { Text("RESTORE", color = Pink) }
+                },
+                dismissButton = { TextButton(onClick = { pendingBackup = null }) { Text("CANCEL") } }
+            )
+        }
+            Scaffold(
             modifier = Modifier.fillMaxSize(),
             containerColor = Void,
             bottomBar = {
