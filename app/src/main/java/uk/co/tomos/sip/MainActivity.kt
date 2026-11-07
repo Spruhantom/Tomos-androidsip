@@ -6,6 +6,8 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -286,6 +288,15 @@ class TomSipEngine(context: android.content.Context) {
 
     fun deleteContact(id: String) = persistContacts(contacts.filterNot { it.id == id })
     private val appContext = context
+    private val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+    private var networkCallbackRegistered = false
+    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+            // A newly available default network may make previously failed SIP
+            // registrations reachable again (for example after Wi-Fi/mobile handover).
+            runCatching { core.refreshRegisters() }
+        }
+    }
 
     init {
         if (prefs.getString("contacts_v2", null) == null && contacts.isNotEmpty()) persistContacts(contacts)
@@ -353,6 +364,12 @@ class TomSipEngine(context: android.content.Context) {
             }
         })
         core.start()
+        // Re-attempt SIP registration when Android reports a new default network.
+        // Keep the callback for the lifetime of the SIP engine, not the Activity UI.
+        runCatching {
+            connectivityManager.registerDefaultNetworkCallback(networkCallback)
+            networkCallbackRegistered = true
+        }
         refreshAudioCodecs(applySavedPreferences = true)
         // Restore saved account profiles only when their encrypted credentials are available.
         sipAccounts.forEach { profile ->
@@ -728,6 +745,10 @@ class TomSipEngine(context: android.content.Context) {
     fun hangup() { core.currentCall?.terminate(); callStatus = "Call ended" }
     fun shutdown() {
         try {
+            if (networkCallbackRegistered) {
+                connectivityManager.unregisterNetworkCallback(networkCallback)
+                networkCallbackRegistered = false
+            }
             notificationManager().cancel(1001)
             notificationManager().cancel(1002)
             core.stop()
