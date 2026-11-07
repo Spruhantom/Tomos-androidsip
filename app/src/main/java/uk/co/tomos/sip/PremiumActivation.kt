@@ -21,7 +21,7 @@ import javax.crypto.KeyGenerator
 import javax.crypto.spec.GCMParameterSpec
 
 private const val PREMIUM_PRODUCT = "tomos-sip"
-private val PREMIUM_FEATURES = setOf(
+private val PREMIUM_FEATURES = listOf(
     "multiple_sip_accounts",
     "advanced_codec_controls",
     "encrypted_backup"
@@ -43,7 +43,7 @@ class PremiumLicenceVerifier(private val publicKeyPem: String) {
         require(payload.getString("activation_code_sha256").matches(Regex("[0-9a-f]{64}")))
         require(payload.getString("issued_at").endsWith("Z"))
         val features = payload.getJSONArray("features")
-        val received = (0 until features.length()).map { features.getString(it) }.toSet()
+        val received = (0 until features.length()).map { features.getString(it) }
         if (received != PREMIUM_FEATURES) return false
         val normalizedCode = activationCode.filterNot { it.isWhitespace() }.uppercase()
         require(normalizedCode.matches(Regex("TOMOS-PREM-(?:[A-Z2-7]{4}-){3}[A-Z2-7]{4}")))
