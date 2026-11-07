@@ -1,6 +1,6 @@
 package uk.co.tomos.sip
 
-import android.util.Base64
+import java.util.Base64
 import org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters
 import org.bouncycastle.crypto.signers.Ed25519Signer
 import org.json.JSONObject
@@ -33,12 +33,12 @@ class PremiumLicenceVerifierTest {
         val signature = signer.generateSignature()
         val spkiPrefix = byteArrayOf(0x30,0x2a,0x30,0x05,0x06,0x03,0x2b,0x65,0x70,0x03,0x21,0x00)
         val publicPem = "-----BEGIN PUBLIC KEY-----\n" +
-            Base64.encodeToString(spkiPrefix + privateKey.generatePublicKey().encoded, Base64.NO_WRAP) +
+            Base64.getEncoder().encodeToString(spkiPrefix + privateKey.generatePublicKey().encoded) +
             "\n-----END PUBLIC KEY-----"
         val document = JSONObject()
             .put("signature_algorithm", "Ed25519")
-            .put("signed_payload", Base64.encodeToString(payloadBytes, Base64.NO_WRAP))
-            .put("signature", Base64.encodeToString(signature, Base64.NO_WRAP))
+            .put("signed_payload", Base64.getEncoder().encodeToString(payloadBytes))
+            .put("signature", Base64.getEncoder().encodeToString(signature))
             .put("payload", JSONObject(canonical))
         assertTrue(PremiumLicenceVerifier(publicPem).verify(document, code))
     }
