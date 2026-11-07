@@ -66,7 +66,6 @@ private data class GitHubUpdate(val buildCode: Int, val releaseName: String, val
 
 data class AudioCodecOption(val id: String, val label: String, val details: String, val enabled: Boolean)
 data class SipContact(val id: String, val name: String, val number: String)
-data class SipCallRecord(val id: String, val peer: String, val address: String, val direction: String, val result: String, val startedAt: Long, val durationSeconds: Long)
 
 private fun normalizeSipIdentity(value: String): String {
     val withoutScheme = value.trim().removePrefix("sip:").removePrefix("sips:")
@@ -274,11 +273,7 @@ class TomSipEngine(context: android.content.Context) {
             }
         }.getOrDefault(emptyList())
         // Preserve legacy entries as imported records rather than discarding history.
-        return prefs.getString("history", "").orEmpty().lines().filter { it.isNotBlank() }
-            .mapIndexed { index, line ->
-                val peer = line.substringBefore(" • ")
-                SipCallRecord("legacy-$index", peer, peer, "Unknown", line.substringAfter(" • ", "Previous call"), 0L, 0L)
-            }
+        return CallHistoryLogic.migrateLegacy(prefs.getString("history", "").orEmpty().lines())
     }
 
     private fun persistCallHistory(records: List<SipCallRecord>) {
@@ -293,7 +288,7 @@ class TomSipEngine(context: android.content.Context) {
         history = records
     }
 
-    fun deleteCallRecord(id: String) = persistCallHistory(history.filterNot { it.id == id })
+    fun deleteCallRecord(id: String) = persistCallHistory(CallHistoryLogic.delete(history, id))
     fun clearCallHistory() = persistCallHistory(emptyList())
     fun callBack(record: SipCallRecord) = call(record.address)
 
@@ -449,14 +444,12 @@ class TomSipEngine(context: android.content.Context) {
                     if (!callHistoryFinalized && callStartedAtEpochMillis > 0L) {
                         val address = call.remoteAddress?.asStringUriOnly() ?: call.remoteAddress?.username ?: "Unknown"
                         val peer = resolveCallerName(call.remoteAddress?.username, call.remoteAddress?.displayName)
-                        val duration = if (callWasConnected && callConnectedAtElapsedMillis > 0L)
-                            ((SystemClock.elapsedRealtime() - callConnectedAtElapsedMillis) / 1000L).coerceAtLeast(0L) else 0L
-                        val result = when {
-                            state == Call.State.Error -> "Failed"
-                            callDirection == "Incoming" && !callWasConnected -> "Missed"
-                            callWasConnected -> "Completed"
-                            else -> "Cancelled"
-                        }
+                        val duration = CallHistoryLogic.durationSeconds(
+                            callWasConnected, callConnectedAtElapsedMillis, SystemClock.elapsedRealtime()
+                        )
+                        val result = CallHistoryLogic.result(
+                            callDirection, callWasConnected, state == Call.State.Error
+                        )
                         val record = SipCallRecord(
                             java.util.UUID.randomUUID().toString(), peer, address, callDirection,
                             result, callStartedAtEpochMillis, duration
