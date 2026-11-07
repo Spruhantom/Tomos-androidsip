@@ -9,8 +9,8 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        buildConfigField("String", "TOMOS_PREMIUM_API_URL", "\"${providers.gradleProperty("tomosPremiumApiUrl").orElse("").get()}\"")
-        buildConfigField("String", "TOMOS_PREMIUM_PUBLIC_KEY", "\"${providers.gradleProperty("tomosPremiumPublicKey").orElse("").get()}\"")
+        buildConfigField("String", "TOMOS_PREMIUM_API_URL", "\"\${providers.gradleProperty("tomosPremiumApiUrl").orElse("").get()}\"")
+        buildConfigField("String", "TOMOS_PREMIUM_PUBLIC_KEY", "\"\${providers.gradleProperty("tomosPremiumPublicKey").orElse("").get()}\"")
         applicationId = "uk.co.tomos.sip"
         minSdk = 26
         targetSdk = 35
@@ -48,4 +48,5 @@ dependencies {
     implementation("org.bouncycastle:bcprov-jdk18on:1.80")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.bouncycastle:bcprov-jdk18on:1.80")
+    testImplementation("org.json:json:20240303")
 }
