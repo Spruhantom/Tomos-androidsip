@@ -116,15 +116,32 @@ class TomSipEngine(context: android.content.Context) {
         core.start()
     }
 
-    fun register(username: String, password: String, domain: String, transport: String) {
+    fun register(
+        username: String,
+        authUsername: String,
+        password: String,
+        domain: String,
+        transport: String,
+        sipPort: String,
+        displayName: String,
+        expirySeconds: String
+    ) {
         try {
-            require(username.isNotBlank() && password.isNotBlank() && domain.isNotBlank()) { "Enter username, password and SIP server." }
+            require(username.isNotBlank() && authUsername.isNotBlank() && password.isNotBlank() && domain.isNotBlank()) {
+                "Enter the SIP extension, authentication username, password and server."
+            }
+            val port = sipPort.toIntOrNull() ?: throw IllegalArgumentException("SIP port must be a number.")
+            require(port in 1..65535) { "SIP port must be between 1 and 65535." }
+            val expiry = expirySeconds.toIntOrNull() ?: throw IllegalArgumentException("Registration expiry must be a number.")
+            require(expiry in 60..86400) { "Registration expiry must be between 60 and 86400 seconds." }
             val cleanDomain = domain.trim().removePrefix("sip:").removePrefix("sips:")
-            val auth = Factory.instance().createAuthInfo(username.trim(), null, password, null, null, cleanDomain)
+            val auth = Factory.instance().createAuthInfo(authUsername.trim(), username.trim(), password, null, null, cleanDomain)
             core.addAuthInfo(auth)
             val params = core.createAccountParams()
             val identity = Factory.instance().createAddress("sip:$username@$cleanDomain")
+            identity?.displayName = displayName.trim().ifBlank { username.trim() }
             val server = Factory.instance().createAddress("sip:$cleanDomain")
+            server?.port = port
             server?.transport = when (transport) {
                 "TCP" -> TransportType.Tcp
                 "TLS" -> TransportType.Tls
@@ -132,6 +149,7 @@ class TomSipEngine(context: android.content.Context) {
             }
             params.identityAddress = identity
             params.serverAddress = server
+            params.expires = expiry
             params.isRegisterEnabled = true
             val account = core.createAccount(params)
             core.addAccount(account)
@@ -189,7 +207,11 @@ private fun TomSipScreen(engine: TomSipEngine) {
     var domain by remember { mutableStateOf("") }
     var transport by remember { mutableStateOf("UDP") }
     var destination by remember { mutableStateOf("") }
-    var showSettings by remember { mutableStateOf(true) }
+    var showSettings by remember { mutableStateOf(false) }
+    var authUsername by remember { mutableStateOf("") }
+    var displayName by remember { mutableStateOf("") }
+    var sipPort by remember { mutableStateOf("5060") }
+    var expirySeconds by remember { mutableStateOf("3600") }
     var contactName by remember { mutableStateOf("") }
     var contactNumber by remember { mutableStateOf("") }
 
@@ -237,6 +259,25 @@ private fun TomSipScreen(engine: TomSipEngine) {
                         Text(engine.callStatus, color = Muted, fontSize = 12.sp)
                     }
                     OutlinedTextField(destination, { destination = it }, Modifier.fillMaxWidth(), label = { Text("Extension or SIP address") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone), colors = fieldColors())
+                    val keypadRows = listOf(listOf("1", "2", "3"), listOf("4", "5", "6"), listOf("7", "8", "9"), listOf("*", "0", "#"))
+                    keypadRows.forEach { keys ->
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            keys.forEach { key ->
+                                OutlinedButton(
+                                    onClick = { destination += key },
+                                    modifier = Modifier.weight(1f).height(54.dp),
+                                    shape = RoundedCornerShape(14.dp),
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
+                                ) {
+                                    Text(key, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+                                }
+                            }
+                        }
+                    }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        TextButton(onClick = { destination = "" }) { Text("CLEAR", color = Pink) }
+                        TextButton(onClick = { if (destination.isNotEmpty()) destination = destination.dropLast(1) }) { Text("⌫ BACKSPACE", color = Cyan) }
+                    }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         FilterChip(selected = engine.muted, onClick = { engine.toggleMute() }, label = { Text(if (engine.muted) "MUTED" else "MUTE") })
                         FilterChip(selected = engine.speaker, onClick = { engine.toggleSpeaker() }, label = { Text("SPEAKER") })
@@ -289,16 +330,30 @@ private fun TomSipScreen(engine: TomSipEngine) {
                         TextButton(onClick = { showSettings = !showSettings }) { Text(if (showSettings) "HIDE" else "EDIT", color = Pink) }
                     }
                     if (showSettings) {
-                        OutlinedTextField(username, { username = it }, Modifier.fillMaxWidth(), label = { Text("SIP username / extension") }, singleLine = true, colors = fieldColors())
+                        OutlinedTextField(username, { username = it }, Modifier.fillMaxWidth(), label = { Text("SIP extension / identity") }, singleLine = true, colors = fieldColors())
                         OutlinedTextField(password, { password = it }, Modifier.fillMaxWidth(), label = { Text("SIP password") }, singleLine = true, visualTransformation = PasswordVisualTransformation(), colors = fieldColors())
                         OutlinedTextField(domain, { domain = it }, Modifier.fillMaxWidth(), label = { Text("SIP server (e.g. pbx.example.com)") }, singleLine = true, colors = fieldColors())
+                        Text("ADVANCED ACCOUNT SETTINGS", color = Pink, fontSize = 10.sp, letterSpacing = 1.5.sp, fontWeight = FontWeight.Bold)
+                        OutlinedTextField(authUsername, { authUsername = it }, Modifier.fillMaxWidth(), label = { Text("Authentication username (blank = extension)") }, singleLine = true, colors = fieldColors())
+                        OutlinedTextField(displayName, { displayName = it }, Modifier.fillMaxWidth(), label = { Text("Caller ID / display name") }, singleLine = true, colors = fieldColors())
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            OutlinedTextField(sipPort, { sipPort = it.filter(Char::isDigit).take(5) }, Modifier.weight(1f), label = { Text("SIP port") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), colors = fieldColors())
+                            OutlinedTextField(expirySeconds, { expirySeconds = it.filter(Char::isDigit).take(5) }, Modifier.weight(1f), label = { Text("Expiry (seconds)") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), colors = fieldColors())
+                        }
                         Text("TRANSPORT", color = Muted, fontSize = 10.sp, letterSpacing = 1.5.sp)
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             listOf("UDP", "TCP", "TLS").forEach { item ->
                                 FilterChip(selected = transport == item, onClick = { transport = item }, label = { Text(item) }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Pink, selectedLabelColor = Color.White))
                             }
                         }
-                        Button(onClick = { engine.register(username, password, domain, transport) }, Modifier.fillMaxWidth().height(50.dp), colors = ButtonDefaults.buttonColors(containerColor = Cyan, contentColor = Void), shape = RoundedCornerShape(14.dp)) {
+                        Button(
+                            onClick = {
+                                engine.register(username, authUsername.ifBlank { username }, password, domain, transport, sipPort, displayName, expirySeconds)
+                            },
+                            Modifier.fillMaxWidth().height(50.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Cyan, contentColor = Void),
+                            shape = RoundedCornerShape(14.dp)
+                        ) {
                             Text("REGISTER ACCOUNT", fontWeight = FontWeight.Black, letterSpacing = 1.sp)
                         }
                     }
