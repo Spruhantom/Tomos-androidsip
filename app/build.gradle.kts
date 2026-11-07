@@ -42,6 +42,6 @@ dependencies {
     implementation("androidx.work:work-runtime-ktx:2.10.0")
     implementation("androidx.media:media:1.2.0")
     implementation("org.linphone:linphone-sdk-android:5.5.38")
-    implementation("com.google.code.gson:gson:2.11.0")
-    testImplementation("junit:junit:4.13.2")
+    implementation("com.google.code.gson:gson:2.11.0")\n    implementation("org.bouncycastle:bcprov-jdk18on:1.80")
+    testImplementation("junit:junit:4.13.2")\n    testImplementation("org.bouncycastle:bcprov-jdk18on:1.80")
 }
