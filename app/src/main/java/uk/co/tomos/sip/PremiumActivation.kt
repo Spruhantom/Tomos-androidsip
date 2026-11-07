@@ -8,6 +8,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.bouncycastle.crypto.params.Ed25519PublicKeyParameters
 import org.bouncycastle.crypto.signers.Ed25519Signer
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
@@ -27,6 +28,25 @@ private val PREMIUM_FEATURES = listOf(
     "encrypted_backup"
 )
 
+/** Compare JSON values recursively without relying on platform-specific JSONObject helpers. */
+private fun jsonEquivalent(left: Any?, right: Any?): Boolean {
+    if (left is JSONObject && right is JSONObject) {
+        val leftKeys = left.keys().asSequence().toSet()
+        val rightKeys = right.keys().asSequence().toSet()
+        return leftKeys == rightKeys && leftKeys.all { key ->
+            jsonEquivalent(left.opt(key), right.opt(key))
+        }
+    }
+    if (left is JSONArray && right is JSONArray) {
+        if (left.length() != right.length()) return false
+        return (0 until left.length()).all { index ->
+            jsonEquivalent(left.opt(index), right.opt(index))
+        }
+    }
+    if (left is Number && right is Number) return left.toString() == right.toString()
+    return left == right
+}
+
 /** Verifies the exact canonical payload bytes signed by the offline generator. */
 class PremiumLicenceVerifier(private val publicKeyPem: String) {
     fun verify(document: JSONObject, activationCode: String): Boolean = runCatching {
@@ -36,7 +56,7 @@ class PremiumLicenceVerifier(private val publicKeyPem: String) {
         val payload = JSONObject(String(signedPayload, StandardCharsets.UTF_8))
         if (payload.toString().isBlank()) return false
         val mirroredPayload = document.getJSONObject("payload")
-        if (!mirroredPayload.similar(payload)) return false
+        if (!jsonEquivalent(mirroredPayload, payload)) return false
         if (payload.getInt("schema") != 1 || payload.getString("product") != PREMIUM_PRODUCT) return false
         if (payload.getString("licence_type") != "lifetime") return false
         UUID.fromString(payload.getString("licence_id"))
