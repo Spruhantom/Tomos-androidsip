@@ -405,9 +405,9 @@ private fun TomSipScreen(engine: TomSipEngine) {
                     }
                 }
             }
+            }
             if (engine.incomingCaller != null) {
-                }
-            Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF252039)), shape = RoundedCornerShape(20.dp)) {
+                Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF252039)), shape = RoundedCornerShape(20.dp)) {
                     Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text("INCOMING CALL", color = Cyan, fontWeight = FontWeight.Bold)
                         Text(engine.incomingCaller ?: "", color = Color.White, fontSize = 20.sp)
