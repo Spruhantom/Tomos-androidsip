@@ -261,6 +261,7 @@ class TomSipEngine(context: android.content.Context) {
     private val appContext = context
 
     init {
+        if (prefs.getString("contacts_v2", null) == null && contacts.isNotEmpty()) persistContacts(contacts)
         core.addListener(object : CoreListenerStub() {
             override fun onAccountRegistrationStateChanged(core: Core, account: Account, state: RegistrationState, message: String) {
                 registered = state == RegistrationState.Ok
