@@ -40,6 +40,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -964,6 +965,9 @@ class TomSipEngine(context: android.content.Context) {
 @Composable
 private fun TomSipScreen(engine: TomSipEngine) {
     val context = LocalContext.current
+    // 600dp follows Android adaptive window guidance: compact phones use bottom navigation,
+    // while unfolded/tablet-sized windows use a navigation rail.
+    val isExpandedLayout = LocalConfiguration.current.screenWidthDp >= 600
     val updateScope = rememberCoroutineScope()
     var updateDownloading by remember { mutableStateOf(false) }
     var updateDownloadedBytes by remember { mutableLongStateOf(0L) }
@@ -1161,14 +1165,36 @@ private fun TomSipScreen(engine: TomSipEngine) {
             modifier = Modifier.fillMaxSize(),
             containerColor = Void,
             bottomBar = {
-                NavigationBar(containerColor = Panel, contentColor = Color.White) {
+                if (!isExpandedLayout) {
+                    NavigationBar(containerColor = Panel, contentColor = Color.White) {
+                        tabs.forEach { tab ->
+                            NavigationBarItem(
+                                selected = selectedTab == tab,
+                                onClick = { selectedTab = tab },
+                                icon = { Text(tabSymbols[tab] ?: "•", fontSize = 19.sp) },
+                                label = { Text(tab) },
+                                colors = NavigationBarItemDefaults.colors(
+                                    selectedIconColor = Cyan, selectedTextColor = Cyan,
+                                    indicatorColor = Color(0xFF303044),
+                                    unselectedIconColor = Muted, unselectedTextColor = Muted
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+        ) { innerPadding ->
+        Row(Modifier.fillMaxSize().padding(innerPadding)) {
+            if (isExpandedLayout) {
+                NavigationRail(containerColor = Panel, contentColor = Color.White) {
                     tabs.forEach { tab ->
-                        NavigationBarItem(
+                        NavigationRailItem(
                             selected = selectedTab == tab,
                             onClick = { selectedTab = tab },
                             icon = { Text(tabSymbols[tab] ?: "•", fontSize = 19.sp) },
                             label = { Text(tab) },
-                            colors = NavigationBarItemDefaults.colors(
+                            alwaysShowLabel = true,
+                            colors = NavigationRailItemDefaults.colors(
                                 selectedIconColor = Cyan, selectedTextColor = Cyan,
                                 indicatorColor = Color(0xFF303044),
                                 unselectedIconColor = Muted, unselectedTextColor = Muted
@@ -1177,12 +1203,13 @@ private fun TomSipScreen(engine: TomSipEngine) {
                     }
                 }
             }
-        ) { innerPadding ->
+            Box(Modifier.weight(1f).fillMaxHeight()) {
         if (engine.activeCall) {
-            ActiveCallScreen(engine = engine, elapsedSeconds = elapsedCallSeconds, modifier = Modifier.fillMaxSize().padding(innerPadding))
+            ActiveCallScreen(engine = engine, elapsedSeconds = elapsedCallSeconds, modifier = Modifier.fillMaxSize())
         } else Column(
-            Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0xFF111426), Void, Color(0xFF090A12))))
-                .padding(innerPadding).verticalScroll(rememberScrollState()).padding(22.dp),
+            Modifier.fillMaxWidth().widthIn(max = 1000.dp).align(Alignment.TopCenter)
+                .background(Brush.verticalGradient(listOf(Color(0xFF111426), Void, Color(0xFF090A12))))
+                .verticalScroll(rememberScrollState()).padding(if (isExpandedLayout) 28.dp else 22.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -1562,6 +1589,8 @@ private fun TomSipScreen(engine: TomSipEngine) {
             }
             }
             Text("TOM OS  •  NEON PUNK EDITION", Modifier.fillMaxWidth(), color = Muted, fontSize = 10.sp, letterSpacing = 1.6.sp)
+        }
+            }
         }
         }
     }
