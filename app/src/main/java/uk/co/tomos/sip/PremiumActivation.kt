@@ -49,7 +49,13 @@ private fun jsonEquivalent(left: Any?, right: Any?): Boolean {
 
 /** Verifies the exact canonical payload bytes signed by the offline generator. */
 class PremiumLicenceVerifier(private val publicKeyPem: String) {
-    fun verify(document: JSONObject, activationCode: String): Boolean = runCatching {
+    fun verify(document: JSONObject, activationCode: String): Boolean =
+        verifyDocument(document, activationCode)
+
+    /** Re-verifies a locally stored licence after restart; the original code is not stored. */
+    fun verifyStored(document: JSONObject): Boolean = verifyDocument(document, null)
+
+    private fun verifyDocument(document: JSONObject, activationCode: String?): Boolean = runCatching {
         if (publicKeyPem.isBlank()) return false
         if (document.optString("signature_algorithm") != "Ed25519") return false
         val signedPayload = Base64.getDecoder().decode(document.getString("signed_payload"))
@@ -65,12 +71,14 @@ class PremiumLicenceVerifier(private val publicKeyPem: String) {
         val features = payload.getJSONArray("features")
         val received = (0 until features.length()).map { features.getString(it) }
         if (received != PREMIUM_FEATURES) return false
-        val normalizedCode = activationCode.filterNot { it.isWhitespace() }.uppercase()
-        require(normalizedCode.matches(Regex("TOMOS-PREM-(?:[A-Z2-7]{4}-){3}[A-Z2-7]{4}")))
-        val codeDigest = MessageDigest.getInstance("SHA-256")
-            .digest(normalizedCode.toByteArray(StandardCharsets.US_ASCII))
-            .joinToString("") { "%02x".format(it) }
-        if (codeDigest != payload.getString("activation_code_sha256")) return false
+        if (activationCode != null) {
+            val normalizedCode = activationCode.filterNot { it.isWhitespace() }.uppercase()
+            require(normalizedCode.matches(Regex("TOMOS-PREM-(?:[A-Z2-7]{4}-){3}[A-Z2-7]{4}")))
+            val codeDigest = MessageDigest.getInstance("SHA-256")
+                .digest(normalizedCode.toByteArray(StandardCharsets.US_ASCII))
+                .joinToString("") { "%02x".format(it) }
+            if (codeDigest != payload.getString("activation_code_sha256")) return false
+        }
 
         val pemBody = publicKeyPem
             .replace("-----BEGIN PUBLIC KEY-----", "")
