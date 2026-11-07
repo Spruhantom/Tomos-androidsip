@@ -12,3 +12,5 @@ Welcome to the documentation for the TomOS SIP Android softphone.
 ## Important testing note
 
 A successful GitHub Actions build confirms that the APK compiles and is packaged. It does not prove that SIP registration, calls, audio routing, notifications or background operation work on every Android device. Complete the real-device checklist before relying on the app in production.
+
+- [UI mockups](screenshots/README.md) — conceptual illustrations of the dialler, contacts, active call, call history and settings screens.
