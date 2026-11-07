@@ -41,7 +41,7 @@ internal object TomosBackupEncryption {
             val encrypted = cipher.doFinal(plaintext)
             header + encrypted
         } finally {
-            password.fill('\\u0000')
+            password.fill('\u0000')
         }
     }
 
@@ -64,7 +64,7 @@ internal object TomosBackupEncryption {
                 throw IllegalArgumentException("Incorrect password or encrypted backup has been changed.")
             }
         } finally {
-            password.fill('\\u0000')
+            password.fill('\u0000')
         }
     }
 
