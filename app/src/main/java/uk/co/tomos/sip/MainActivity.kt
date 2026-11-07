@@ -12,6 +12,8 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.SystemClock
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import java.io.File
 import androidx.core.content.FileProvider
@@ -174,7 +176,15 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             notificationPermissionRequest.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
-        sip = TomSipEngine(applicationContext)
+        sip = (application as TomosSipApplication).sipEngine
+        // Start Linphone's SDK service while the activity is visible. The service
+        // keeps the SDK core alive when the UI is backgrounded and across task removal.
+        val serviceIntent = Intent(this, org.linphone.core.tools.service.CoreService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            ContextCompat.startForegroundService(this, serviceIntent)
+        } else {
+            startService(serviceIntent)
+        }
         handleCallAction(intent)
         setContent { TomSipScreen(sip!!) }
     }
@@ -192,7 +202,9 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    override fun onDestroy() { sip?.shutdown(); sip = null; super.onDestroy() }
+    // The Application owns the SIP engine. Destroying/recreating this Activity must
+    // never stop the Core or drop active registrations/calls.
+    override fun onDestroy() { sip = null; super.onDestroy() }
 }
 
 class TomSipEngine(context: android.content.Context) {
@@ -290,11 +302,30 @@ class TomSipEngine(context: android.content.Context) {
     private val appContext = context
     private val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
     private var networkCallbackRegistered = false
+    private val recoveryHandler = Handler(Looper.getMainLooper())
+    private var pendingNetworkRefresh: Runnable? = null
+    private var pendingRegistrationRetry: Runnable? = null
+    private var registrationRetryAttempt = 0
+    private val maxRegistrationRetries = 3
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
-            // A newly available default network may make previously failed SIP
-            // registrations reachable again (for example after Wi-Fi/mobile handover).
-            runCatching { core.refreshRegisters() }
+            // Debounce network handovers: Android can report several callbacks while
+            // Wi-Fi/mobile routing changes. Refresh once the new default route settles.
+            pendingNetworkRefresh?.let(recoveryHandler::removeCallbacks)
+            val refresh = Runnable {
+                pendingNetworkRefresh = null
+                registrationRetryAttempt = 0
+                pendingRegistrationRetry?.let(recoveryHandler::removeCallbacks)
+                pendingRegistrationRetry = null
+                runCatching { core.refreshRegisters() }
+            }
+            pendingNetworkRefresh = refresh
+            recoveryHandler.postDelayed(refresh, 1_500L)
+        }
+        override fun onLost(network: Network) {
+            // Do not refresh on loss; wait for onAvailable for the replacement route.
+            pendingNetworkRefresh?.let(recoveryHandler::removeCallbacks)
+            pendingNetworkRefresh = null
         }
     }
 
@@ -314,6 +345,13 @@ class TomSipEngine(context: android.content.Context) {
                 if (profileId != null) {
                     registrationStates = registrationStates + (profileId to SipAccountRegistration(profileId, stateLabel, message))
                     registered = registrationStates.values.any { it.state == "Registered" }
+                    if (state == RegistrationState.Ok) {
+                        registrationRetryAttempt = 0
+                        pendingRegistrationRetry?.let(recoveryHandler::removeCallbacks)
+                        pendingRegistrationRetry = null
+                    } else if (state == RegistrationState.Failed) {
+                        scheduleRegistrationRetry()
+                    }
                 } else {
                     registered = state == RegistrationState.Ok
                 }
@@ -365,7 +403,7 @@ class TomSipEngine(context: android.content.Context) {
         })
         core.start()
         // Re-attempt SIP registration when Android reports a new default network.
-        // Keep the callback for the lifetime of the SIP engine, not the Activity UI.
+        // Keep the callback for the lifetime of the application-owned SIP engine.
         runCatching {
             connectivityManager.registerDefaultNetworkCallback(networkCallback)
             networkCallbackRegistered = true
@@ -381,6 +419,21 @@ class TomSipEngine(context: android.content.Context) {
             }
         }
         selectedSipAccountId?.let(::selectOutgoingAccount)
+    }
+
+    private fun scheduleRegistrationRetry() {
+        if (pendingRegistrationRetry != null || registrationRetryAttempt >= maxRegistrationRetries) return
+        val delayMillis = 5_000L * (1L shl registrationRetryAttempt)
+        registrationRetryAttempt += 1
+        val retry = Runnable {
+            pendingRegistrationRetry = null
+            // Avoid retrying while Android has no active default network.
+            if (connectivityManager.activeNetwork != null) {
+                runCatching { core.refreshRegisters() }
+            }
+        }
+        pendingRegistrationRetry = retry
+        recoveryHandler.postDelayed(retry, delayMillis)
     }
 
     private fun codecId(payloadType: PayloadType): String =
@@ -745,6 +798,10 @@ class TomSipEngine(context: android.content.Context) {
     fun hangup() { core.currentCall?.terminate(); callStatus = "Call ended" }
     fun shutdown() {
         try {
+            pendingNetworkRefresh?.let(recoveryHandler::removeCallbacks)
+            pendingNetworkRefresh = null
+            pendingRegistrationRetry?.let(recoveryHandler::removeCallbacks)
+            pendingRegistrationRetry = null
             if (networkCallbackRegistered) {
                 connectivityManager.unregisterNetworkCallback(networkCallback)
                 networkCallbackRegistered = false
