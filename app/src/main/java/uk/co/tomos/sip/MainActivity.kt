@@ -178,9 +178,9 @@ class MainActivity : ComponentActivity() {
             notificationPermissionRequest.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
         sip = (application as TomosSipApplication).sipEngine
-        // Start Linphone's SDK service while the activity is visible. The service
-        // keeps the SDK core alive when the UI is backgrounded and across task removal.
-        val serviceIntent = Intent(this, org.linphone.core.tools.service.CoreService::class.java)
+        // Start TomOS's service for the exact application-owned SIP engine. Starting
+        // Linphone CoreService here would create a second, unrelated Core.
+        val serviceIntent = Intent(this, TomosSipForegroundService::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             ContextCompat.startForegroundService(this, serviceIntent)
         } else {
