@@ -8,6 +8,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
+import android.net.NetworkCapabilities
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -309,21 +310,21 @@ class TomSipEngine(context: android.content.Context) {
     private val maxRegistrationRetries = 3
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
-            // Debounce network handovers: Android can report several callbacks while
-            // Wi-Fi/mobile routing changes. Refresh once the new default route settles.
-            pendingNetworkRefresh?.let(recoveryHandler::removeCallbacks)
-            val refresh = Runnable {
+            // Wait for validated internet; Wi-Fi association alone does not mean
+            // the PBX can be reached (captive portals and no-internet networks).
+            scheduleNetworkRecoveryIfUsable()
+        }
+        override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
+            if (capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) {
+                scheduleNetworkRecoveryIfUsable()
+            } else {
+                pendingNetworkRefresh?.let(recoveryHandler::removeCallbacks)
                 pendingNetworkRefresh = null
-                registrationRetryAttempt = 0
-                pendingRegistrationRetry?.let(recoveryHandler::removeCallbacks)
-                pendingRegistrationRetry = null
-                runCatching { core.refreshRegisters() }
             }
-            pendingNetworkRefresh = refresh
-            recoveryHandler.postDelayed(refresh, 1_500L)
         }
         override fun onLost(network: Network) {
-            // Do not refresh on loss; wait for onAvailable for the replacement route.
+            // Do not refresh on loss; wait for a replacement validated route.
             pendingNetworkRefresh?.let(recoveryHandler::removeCallbacks)
             pendingNetworkRefresh = null
         }
@@ -421,6 +422,29 @@ class TomSipEngine(context: android.content.Context) {
         selectedSipAccountId?.let(::selectOutgoingAccount)
     }
 
+    private fun hasValidatedInternet(): Boolean {
+        val network = connectivityManager.activeNetwork ?: return false
+        val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return false
+        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+    }
+
+    private fun scheduleNetworkRecoveryIfUsable() {
+        if (!hasValidatedInternet()) return
+        pendingNetworkRefresh?.let(recoveryHandler::removeCallbacks)
+        val refresh = Runnable {
+            pendingNetworkRefresh = null
+            if (hasValidatedInternet()) {
+                registrationRetryAttempt = 0
+                pendingRegistrationRetry?.let(recoveryHandler::removeCallbacks)
+                pendingRegistrationRetry = null
+                runCatching { core.refreshRegisters() }
+            }
+        }
+        pendingNetworkRefresh = refresh
+        recoveryHandler.postDelayed(refresh, 1_500L)
+    }
+
     private fun scheduleRegistrationRetry() {
         if (pendingRegistrationRetry != null || registrationRetryAttempt >= maxRegistrationRetries) return
         val delayMillis = 5_000L * (1L shl registrationRetryAttempt)
@@ -428,7 +452,7 @@ class TomSipEngine(context: android.content.Context) {
         val retry = Runnable {
             pendingRegistrationRetry = null
             // Avoid retrying while Android has no active default network.
-            if (connectivityManager.activeNetwork != null) {
+            if (hasValidatedInternet()) {
                 runCatching { core.refreshRegisters() }
             }
         }
