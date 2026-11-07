@@ -292,10 +292,43 @@ class TomSipEngine(context: android.content.Context) {
     fun deleteCallRecord(id: String) = persistCallHistory(CallHistoryLogic.delete(history, id))
     fun clearCallHistory() = persistCallHistory(emptyList())
 
-    /** Replace only contacts and call history; SIP credentials and account settings are untouched. */
+    /**
+     * Validate and serialise both datasets before writing either one. A single
+     * synchronous SharedPreferences commit stores both keys together, so a failed
+     * restore cannot leave contacts updated while call history remains old.
+     */
     fun restoreBackup(document: TomosBackupDocument) {
-        persistContacts(requireNotNull(document.contacts).sortedBy { it.name.lowercase() })
-        persistCallHistory(requireNotNull(document.callHistory))
+        val restoredContacts = requireNotNull(document.contacts)
+            .sortedBy { it.name.lowercase(Locale.ROOT) }
+        val restoredHistory = requireNotNull(document.callHistory).toList()
+        val contactsJson = JSONArray().apply {
+            restoredContacts.forEach { contact ->
+                put(org.json.JSONObject()
+                    .put("id", contact.id)
+                    .put("name", contact.name)
+                    .put("number", contact.number))
+            }
+        }.toString()
+        val historyJson = JSONArray().apply {
+            restoredHistory.forEach { record ->
+                put(org.json.JSONObject()
+                    .put("id", record.id)
+                    .put("peer", record.peer)
+                    .put("address", record.address)
+                    .put("direction", record.direction)
+                    .put("result", record.result)
+                    .put("startedAt", record.startedAt)
+                    .put("durationSeconds", record.durationSeconds))
+            }
+        }.toString()
+
+        check(prefs.edit()
+            .putString("contacts_v2", contactsJson)
+            .putString("call_history_v2", historyJson)
+            .commit()) { "Android couldn't save the restored backup. Your existing data has been kept." }
+
+        contacts = restoredContacts
+        history = restoredHistory
     }
     fun callBack(record: SipCallRecord) = call(record.address)
 
