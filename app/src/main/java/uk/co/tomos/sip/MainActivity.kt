@@ -480,8 +480,8 @@ class TomSipEngine(context: android.content.Context) {
     }
 
     fun removeSipAccount(accountId: String) {
-        if (activeCall && core.currentCall?.params?.account == runtimeAccounts[accountId]) {
-            status = "End the active call before removing this account."
+        if (activeCall) {
+            status = "End the active call before removing a SIP account."
             return
         }
         runtimeAccounts.remove(accountId)?.let { account ->
@@ -938,6 +938,30 @@ private fun TomSipScreen(engine: TomSipEngine) {
                         ) {
                             Text("REGISTER ACCOUNT", fontWeight = FontWeight.Black, letterSpacing = 1.sp)
                         }
+                    }
+                }
+            }
+            Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(20.dp)) {
+                Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("SIP ACCOUNTS", color = Cyan, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+                    Text("Add accounts using the form above. Choose which registered identity is used for outgoing calls.", color = Muted, fontSize = 12.sp)
+                    if (engine.sipAccounts.isEmpty()) Text("No saved SIP accounts yet.", color = Muted, fontSize = 12.sp)
+                    engine.sipAccounts.forEach { account ->
+                        val accountState = engine.registrationStates[account.id]
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                Text(account.label, color = Color.White, fontWeight = FontWeight.SemiBold)
+                                Text("${account.username}@${account.domain} • ${account.transport.name}", color = Muted, fontSize = 11.sp)
+                                Text(accountState?.state ?: "Not registered", color = if (accountState?.state == "Registered") Cyan else Pink, fontSize = 11.sp)
+                            }
+                            if (engine.selectedSipAccountId == account.id) {
+                                Text("DEFAULT", color = Cyan, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            } else {
+                                TextButton(onClick = { engine.selectOutgoingAccount(account.id) }) { Text("USE", color = Cyan) }
+                            }
+                            TextButton(onClick = { engine.removeSipAccount(account.id) }) { Text("REMOVE", color = Pink) }
+                        }
+                        Divider(color = Color(0xFF3A4054))
                     }
                 }
             }
