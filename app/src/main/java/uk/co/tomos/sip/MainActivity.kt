@@ -23,6 +23,7 @@ import androidx.core.app.Person
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -290,6 +291,12 @@ class TomSipEngine(context: android.content.Context) {
 
     fun deleteCallRecord(id: String) = persistCallHistory(CallHistoryLogic.delete(history, id))
     fun clearCallHistory() = persistCallHistory(emptyList())
+
+    /** Replace only contacts and call history; SIP credentials and account settings are untouched. */
+    fun restoreBackup(document: TomosBackupDocument) {
+        persistContacts(requireNotNull(document.contacts).sortedBy { it.name.lowercase() })
+        persistCallHistory(requireNotNull(document.callHistory))
+    }
     fun callBack(record: SipCallRecord) = call(record.address)
 
     private fun loadContacts(): List<SipContact> {
@@ -931,6 +938,46 @@ private fun TomSipScreen(engine: TomSipEngine) {
     var updateMessage by remember { mutableStateOf("Checking GitHub releases…") }
     var availableUpdate by remember { mutableStateOf<GitHubUpdate?>(null) }
     var updateCheckKey by remember { mutableIntStateOf(0) }
+    var backupMessage by remember { mutableStateOf("Back up contacts and call history before reinstalling.") }
+    var pendingBackup by remember { mutableStateOf<TomosBackupDocument?>(null) }
+    val exportBackupLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri != null) {
+            try {
+                val json = TomosBackupCodec.encode(engine.contacts, engine.history)
+                context.contentResolver.openOutputStream(uri)?.bufferedWriter(Charsets.UTF_8)?.use { it.write(json) }
+                    ?: throw IllegalStateException("Android couldn't open the selected backup file.")
+                backupMessage = "Backup saved. Keep this file somewhere safe before reinstalling."
+            } catch (error: Exception) {
+                backupMessage = "Backup failed: ${error.message ?: "could not save file"}"
+            }
+        }
+    }
+    val importBackupLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            try {
+                val input = context.contentResolver.openInputStream(uri)
+                    ?: throw IllegalStateException("Android couldn't open the selected file.")
+                val bytes = input.use { stream ->
+                    val output = java.io.ByteArrayOutputStream()
+                    val buffer = ByteArray(8192)
+                    var total = 0
+                    while (true) {
+                        val count = stream.read(buffer)
+                        if (count < 0) break
+                        total += count
+                        require(total <= TomosBackupCodec.MAX_BACKUP_BYTES) { "Backup file is larger than 5 MB." }
+                        output.write(buffer, 0, count)
+                    }
+                    output.toByteArray()
+                }
+                pendingBackup = TomosBackupCodec.decode(bytes.toString(Charsets.UTF_8))
+                backupMessage = "Backup checked. Confirm below to replace the current contacts and call history."
+            } catch (error: Exception) {
+                pendingBackup = null
+                backupMessage = "Restore failed: ${error.message ?: "invalid backup file"}"
+            }
+        }
+    }
     LaunchedEffect(updateCheckKey) {
         updateMessage = "Checking GitHub releases…"
         try {
@@ -975,7 +1022,27 @@ private fun TomSipScreen(engine: TomSipEngine) {
         primary = Pink, secondary = Cyan, background = Void, surface = Panel,
         onPrimary = Color.White, onBackground = Color.White, onSurface = Color.White
     )) {
-        Scaffold(
+        if (pendingBackup != null) {
+            val backup = pendingBackup!!
+            AlertDialog(
+                onDismissRequest = { pendingBackup = null },
+                title = { Text("Restore TomOS backup?") },
+                text = { Text("This will replace ${engine.contacts.size} contacts and ${engine.history.size} call records with ${backup.contacts?.size ?: 0} contacts and ${backup.callHistory?.size ?: 0} call records from this backup. SIP accounts and passwords are not included or changed.") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        try {
+                            engine.restoreBackup(backup)
+                            backupMessage = "Restore complete. Contacts and call history have been restored."
+                        } catch (error: Exception) {
+                            backupMessage = "Restore failed: ${error.message ?: "could not apply backup"}"
+                        }
+                        pendingBackup = null
+                    }) { Text("RESTORE", color = Pink) }
+                },
+                dismissButton = { TextButton(onClick = { pendingBackup = null }) { Text("CANCEL") } }
+            )
+        }
+            Scaffold(
             modifier = Modifier.fillMaxSize(),
             containerColor = Void,
             bottomBar = {
@@ -1247,6 +1314,18 @@ private fun TomSipScreen(engine: TomSipEngine) {
             }
             }
             if (selectedTab == "Settings") {
+            Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(20.dp)) {
+                Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("DATA BACKUP & RESTORE", color = Cyan, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+                    Text("Export contacts and call history to a JSON file, then import it after reinstalling TomOS SIP.", color = Muted, fontSize = 12.sp)
+                    Text(backupMessage, color = Color.White, fontSize = 12.sp)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = { exportBackupLauncher.launch("tomos-sip-backup.json") }, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = Cyan, contentColor = Void)) { Text("EXPORT BACKUP") }
+                        OutlinedButton(onClick = { importBackupLauncher.launch(arrayOf("application/json", "text/json", "application/octet-stream")) }, modifier = Modifier.weight(1f)) { Text("IMPORT BACKUP") }
+                    }
+                    Text("SIP passwords and account credentials are deliberately excluded. Restore replaces contacts and call history only. Keep the backup file outside the app before uninstalling.", color = Muted, fontSize = 11.sp)
+                }
+            }
             Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(20.dp)) {
                 Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
