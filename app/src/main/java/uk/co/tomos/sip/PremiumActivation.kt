@@ -3,7 +3,7 @@ package uk.co.tomos.sip
 import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
-import android.util.Base64
+import java.util.Base64
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.bouncycastle.crypto.params.Ed25519PublicKeyParameters
@@ -32,7 +32,7 @@ class PremiumLicenceVerifier(private val publicKeyPem: String) {
     fun verify(document: JSONObject, activationCode: String): Boolean = runCatching {
         if (publicKeyPem.isBlank()) return false
         if (document.optString("signature_algorithm") != "Ed25519") return false
-        val signedPayload = Base64.decode(document.getString("signed_payload"), Base64.DEFAULT)
+        val signedPayload = Base64.getDecoder().decode(document.getString("signed_payload"))
         val payload = JSONObject(String(signedPayload, StandardCharsets.UTF_8))
         if (payload.toString().isBlank()) return false
         val mirroredPayload = document.getJSONObject("payload")
@@ -52,14 +52,14 @@ class PremiumLicenceVerifier(private val publicKeyPem: String) {
             .replace("-----BEGIN PUBLIC KEY-----", "")
             .replace("-----END PUBLIC KEY-----", "")
             .filterNot { it.isWhitespace() }
-        val encoded = Base64.decode(pemBody, Base64.DEFAULT)
+        val encoded = Base64.getDecoder().decode(pemBody)
         // SubjectPublicKeyInfo for Ed25519 ends with the 32-byte raw public key.
         if (encoded.size < 32) return false
         val rawKey = encoded.copyOfRange(encoded.size - 32, encoded.size)
         val signer = Ed25519Signer()
         signer.init(false, Ed25519PublicKeyParameters(rawKey, 0))
         signer.update(signedPayload, 0, signedPayload.size)
-        signer.verifySignature(Base64.decode(document.getString("signature"), Base64.DEFAULT))
+        signer.verifySignature(Base64.getDecoder().decode(document.getString("signature")))
     }.getOrDefault(false)
 }
 
@@ -124,13 +124,13 @@ class SecurePremiumLicenceStore(context: Context) {
         cipher.init(Cipher.ENCRYPT_MODE, key)
         val ciphertext = cipher.doFinal(value.toByteArray(StandardCharsets.UTF_8))
         val packed = cipher.iv + ciphertext
-        check(prefs.edit().putString("licence", Base64.encodeToString(packed, Base64.NO_WRAP)).commit()) {
+        check(prefs.edit().putString("licence", Base64.getEncoder().encodeToString(packed)).commit()) {
             "Unable to save the Premium licence securely."
         }
     }
 
     fun load(): String? = runCatching {
-        val packed = Base64.decode(prefs.getString("licence", null) ?: return null, Base64.DEFAULT)
+        val packed = Base64.getDecoder().decode(prefs.getString("licence", null) ?: return null)
         require(packed.size > 12)
         val iv = packed.copyOfRange(0, 12)
         val ciphertext = packed.copyOfRange(12, packed.size)
