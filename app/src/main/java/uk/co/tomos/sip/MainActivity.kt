@@ -288,7 +288,7 @@ class TomSipEngine(context: android.content.Context) {
         history = records
     }
 
-    fun deleteCallRecord(id: String) = persistCallHistory(history.filterNot { it.id == id })
+    fun deleteCallRecord(id: String) = persistCallHistory(CallHistoryLogic.delete(history, id))
     fun clearCallHistory() = persistCallHistory(emptyList())
     fun callBack(record: SipCallRecord) = call(record.address)
 
