@@ -17,10 +17,11 @@ Allow TomOS SIP to configure and register more than one independent SIP identity
 
 1. Add profile and validation domain types. (Implemented)
 2. Add Android Keystore-backed credential storage and non-secret profile persistence. (Implemented; not yet wired into registration UI)
-3. Implement the Linphone account registry and per-account registration callbacks. (Next)
-4. Add account management UI, registration indicators and selected outgoing account.
-5. Route outgoing calls through the selected identity and expose the receiving identity during incoming calls.
-6. Add automated and Android Keystore instrumentation tests; expand the PBX/device checklist.
+3. Implement the Linphone account registry and per-account registration callbacks. (Implemented; requires PBX validation)
+4. Add account management UI, registration indicators and selected outgoing account. (Implemented)
+5. Add account editing, enable/disable and credential re-entry after Keystore restoration failures. (Implemented)
+6. Route outgoing calls through the selected identity and expose the receiving identity during incoming calls. (Implemented in part; receiving-account identification still requires validation)
+7. Add automated and Android Keystore instrumentation tests; expand the PBX/device checklist. (In progress)
 
 ## Acceptance criteria
 
@@ -36,3 +37,12 @@ Allow TomOS SIP to configure and register more than one independent SIP identity
 ## Current limitation
 
 The profile model, profile metadata store and encrypted credential store now exist. The credential store uses a separate Android Keystore AES-256-GCM key per account; preferences contain only Base64-encoded IV and ciphertext. The profile metadata JSON contains no password field. The stores are not yet wired into registration UI or Linphone Core. Multi-account registration is not available until stages 3–5 are implemented and tested. If Android restores encrypted preferences without the corresponding Keystore key, the affected SIP password must be entered again.
+
+
+## Account management improvements
+
+- Editing an account retains its stable profile ID and encrypted credential slot. Saving the edited account replaces its previous runtime registration rather than creating a second profile.
+- Disabling an account unregisters only that account and preserves its profile and encrypted credential. Re-enabling restores registration when the credential can be decrypted.
+- When credential decryption fails (for example, after Android restores preferences without the original Keystore key), the profile remains saved and the UI offers password re-entry. A newly encrypted credential is stored before registration is attempted.
+- A second profile with the same username, server, transport and port is rejected; users are directed to edit the existing profile.
+- Account edits and enable/disable operations are blocked during an active call to avoid disrupting call ownership.

@@ -403,17 +403,27 @@ class TomSipEngine(context: android.content.Context) {
         transport: String,
         sipPort: String,
         displayName: String,
-        expirySeconds: String
+        expirySeconds: String,
+        editAccountId: String? = null
     ) {
         try {
             val cleanDomain = domain.trim().removePrefix("sip:").removePrefix("sips:")
             val transportType = runCatching { SipTransport.valueOf(transport.uppercase()) }.getOrDefault(SipTransport.UDP)
-            val existing = sipAccounts.firstOrNull {
-                it.username.equals(username.trim(), ignoreCase = true) &&
+            val matching = sipAccounts.filter {
+                it.id != editAccountId &&
+                    it.username.equals(username.trim(), ignoreCase = true) &&
                     it.domain.equals(cleanDomain, ignoreCase = true) &&
                     it.transport == transportType &&
                     it.port == (sipPort.toIntOrNull() ?: 0)
             }
+            require(matching.isEmpty()) { "This SIP identity is already configured. Edit the existing account instead." }
+            val existing = sipAccounts.firstOrNull { it.id == editAccountId }
+                ?: sipAccounts.firstOrNull {
+                    it.username.equals(username.trim(), ignoreCase = true) &&
+                        it.domain.equals(cleanDomain, ignoreCase = true) &&
+                        it.transport == transportType &&
+                        it.port == (sipPort.toIntOrNull() ?: 0)
+                }
             val profile = SipAccountProfile(
                 id = existing?.id ?: java.util.UUID.randomUUID().toString(),
                 label = displayName.trim().ifBlank { username.trim() },
@@ -489,6 +499,63 @@ class TomSipEngine(context: android.content.Context) {
         core.defaultAccount = account
         selectedSipAccountId = profile.id
         profileStore.selectAccount(profile.id)
+    }
+
+    fun editSipAccount(accountId: String) {
+        if (activeCall) { status = "End the active call before editing a SIP account."; return }
+        val profile = sipAccounts.firstOrNull { it.id == accountId } ?: return
+        runtimeAccounts.remove(accountId)?.let { account ->
+            accountIdsByIdentity.remove(account.params.identityAddress?.asStringUriOnly())
+            core.removeAccount(account)
+        }
+        registrationStates = registrationStates + (accountId to SipAccountRegistration(accountId, "Password required", "Save the edited account with its SIP password to register it again."))
+        registered = registrationStates.values.any { it.state == "Registered" }
+    }
+
+    fun setSipAccountEnabled(accountId: String, enabled: Boolean) {
+        if (activeCall) { status = "End the active call before changing SIP accounts."; return }
+        val current = sipAccounts.firstOrNull { it.id == accountId } ?: return
+        if (current.enabled == enabled) return
+        if (!enabled) {
+            runtimeAccounts.remove(accountId)?.let { account ->
+                accountIdsByIdentity.remove(account.params.identityAddress?.asStringUriOnly())
+                core.removeAccount(account)
+            }
+            val updated = current.copy(enabled = false)
+            persistAccountProfile(updated)
+            registrationStates = registrationStates + (accountId to SipAccountRegistration(accountId, "Disabled"))
+            if (selectedSipAccountId == accountId) {
+                val next = sipAccounts.firstOrNull { it.id != accountId && it.enabled && runtimeAccounts.containsKey(it.id) }
+                if (next != null) selectOutgoingAccount(next.id) else {
+                    selectedSipAccountId = null
+                    profileStore.selectAccount(null)
+                    core.defaultAccount = null
+                }
+            }
+        } else {
+            val updated = current.copy(enabled = true)
+            persistAccountProfile(updated)
+            val secret = runCatching { credentialStore.read(accountId) }.getOrNull()
+            if (secret == null) {
+                registrationStates = registrationStates + (accountId to SipAccountRegistration(accountId, "Password required", "Enter the SIP password to enable this account."))
+            } else {
+                runCatching { configureAccount(updated, secret, makeDefault = false) }
+                    .onFailure { registrationStates = registrationStates + (accountId to SipAccountRegistration(accountId, "Configuration failed", it.message.orEmpty())) }
+            }
+        }
+        registered = registrationStates.values.any { it.state == "Registered" }
+    }
+
+    fun restoreSipAccountPassword(accountId: String, password: String) {
+        if (password.isBlank()) { status = "Enter the SIP password."; return }
+        val profile = sipAccounts.firstOrNull { it.id == accountId } ?: return
+        try {
+            credentialStore.save(accountId, password)
+            if (profile.enabled) configureAccount(profile, password, makeDefault = selectedSipAccountId == accountId || core.defaultAccount == null)
+            status = "SIP credentials saved. Registering…"
+        } catch (error: Exception) {
+            status = error.message ?: "Unable to restore SIP credentials."
+        }
     }
 
     fun removeSipAccount(accountId: String) {
@@ -675,6 +742,9 @@ private fun TomSipScreen(engine: TomSipEngine) {
     var transport by remember { mutableStateOf("UDP") }
     var destination by remember { mutableStateOf("") }
     var showSettings by remember { mutableStateOf(false) }
+    var editingSipAccountId by remember { mutableStateOf<String?>(null) }
+    var credentialAccountId by remember { mutableStateOf<String?>(null) }
+    var credentialPassword by remember { mutableStateOf("") }
     var authUsername by remember { mutableStateOf("") }
     var displayName by remember { mutableStateOf("") }
     var sipPort by remember { mutableStateOf("5060") }
@@ -942,13 +1012,14 @@ private fun TomSipScreen(engine: TomSipEngine) {
                         }
                         Button(
                             onClick = {
-                                engine.register(username, authUsername.ifBlank { username }, password, domain, transport, sipPort, displayName, expirySeconds)
+                                engine.register(username, authUsername.ifBlank { username }, password, domain, transport, sipPort, displayName, expirySeconds, editingSipAccountId)
+                                if (engine.status.startsWith("Registering")) { editingSipAccountId = null; password = "" }
                             },
                             Modifier.fillMaxWidth().height(50.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = Cyan, contentColor = Void),
                             shape = RoundedCornerShape(14.dp)
                         ) {
-                            Text("REGISTER ACCOUNT", fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+                            Text(if (editingSipAccountId == null) "REGISTER ACCOUNT" else "SAVE ACCOUNT CHANGES", fontWeight = FontWeight.Black, letterSpacing = 1.sp)
                         }
                     }
                 }
@@ -971,7 +1042,34 @@ private fun TomSipScreen(engine: TomSipEngine) {
                             } else {
                                 TextButton(onClick = { engine.selectOutgoingAccount(account.id) }) { Text("USE", color = Cyan) }
                             }
+                            TextButton(onClick = {
+                                editingSipAccountId = account.id
+                                username = account.username
+                                authUsername = account.authUsername
+                                domain = account.domain
+                                transport = account.transport.name
+                                sipPort = account.port.toString()
+                                displayName = account.displayName
+                                expirySeconds = account.expirySeconds.toString()
+                                password = ""
+                                showSettings = true
+                            }) { Text("EDIT", color = Cyan) }
+                            TextButton(onClick = { engine.setSipAccountEnabled(account.id, !account.enabled) }) {
+                                Text(if (account.enabled) "DISABLE" else "ENABLE", color = if (account.enabled) Pink else Cyan)
+                            }
+                            if (accountState?.state == "Password required") {
+                                TextButton(onClick = { credentialAccountId = account.id; credentialPassword = "" }) { Text("ENTER PASSWORD", color = Cyan) }
+                            }
                             TextButton(onClick = { engine.removeSipAccount(account.id) }) { Text("REMOVE", color = Pink) }
+                            if (credentialAccountId == account.id) {
+                                Column(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    OutlinedTextField(credentialPassword, { credentialPassword = it }, Modifier.fillMaxWidth(), label = { Text("SIP password") }, singleLine = true, visualTransformation = PasswordVisualTransformation(), colors = fieldColors())
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Button(onClick = { engine.restoreSipAccountPassword(account.id, credentialPassword); credentialAccountId = null; credentialPassword = "" }) { Text("SAVE PASSWORD") }
+                                        TextButton(onClick = { credentialAccountId = null; credentialPassword = "" }) { Text("CANCEL") }
+                                    }
+                                }
+                            }
                         }
                         Divider(color = Color(0xFF3A4054))
                     }

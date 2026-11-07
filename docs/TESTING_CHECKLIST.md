@@ -55,6 +55,12 @@ Use this checklist with a test PBX and non-production SIP accounts. Record the d
 - [ ] Select each registered account and place a call; verify the caller identity and short-extension domain use the selected account.
 - [ ] Receive calls on each account and confirm the PBX routes them to the correct handset/app session.
 - [ ] Restart the app and confirm saved account profiles restore; re-enter credentials if Android Keystore keys are unavailable after restore.
+- [ ] Edit an existing account and confirm its profile ID is retained and only one runtime registration remains.
+- [ ] Disable one account and confirm it unregisters while other accounts remain registered.
+- [ ] Re-enable an account with a valid stored credential and confirm it registers again.
+- [ ] Simulate unavailable Android Keystore credentials and confirm the account remains saved with a password re-entry action.
+- [ ] Re-enter the password and confirm the credential is re-encrypted and registration resumes.
+- [ ] Try adding the same username, server, transport and port twice and confirm the duplicate is rejected.
 - [ ] Update an existing account and confirm it does not create a duplicate registration.
 - [ ] Remove an account while idle and confirm other account registrations remain active.
 - [ ] Confirm account removal is blocked while a call is active.
