@@ -8,7 +8,8 @@ android {
     namespace = "uk.co.tomos.sip"
     compileSdk = 35
 
-    defaultConfig {\n        buildConfigField("String", "TOMOS_PREMIUM_API_URL", "\\"${providers.gradleProperty("tomosPremiumApiUrl").orElse("").get()}\\"")\n        buildConfigField("String", "TOMOS_PREMIUM_PUBLIC_KEY", "\\"${providers.gradleProperty("tomosPremiumPublicKey").orElse("").get()}\\"")
+    defaultConfig {
+        buildConfigField("String", "TOMOS_PREMIUM_API_URL", "\\"${providers.gradleProperty("tomosPremiumApiUrl").orElse("").get()}\\"")\n        buildConfigField("String", "TOMOS_PREMIUM_PUBLIC_KEY", "\\"${providers.gradleProperty("tomosPremiumPublicKey").orElse("").get()}\\"")
         applicationId = "uk.co.tomos.sip"
         minSdk = 26
         targetSdk = 35
