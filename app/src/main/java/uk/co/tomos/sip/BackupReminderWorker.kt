@@ -67,7 +67,11 @@ class BackupReminderWorker(
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .build()
 
-        manager.notify(4101, notification)
+        try {
+            manager.notify(4101, notification)
+        } catch (_: SecurityException) {
+            // Android 13+ may deny notifications until the user grants permission.
+        }
         return Result.success()
     }
 }
