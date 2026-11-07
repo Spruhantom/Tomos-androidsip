@@ -11,7 +11,7 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <application android:name=".TomosSipApplication" android:icon="@drawable/tomos_logo" android:allowBackup="false" android:label="TomOS SIP" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:supportsRtl="true">
-        <service android:name="org.linphone.core.tools.service.CoreService" android:foregroundServiceType="phoneCall" android:stopWithTask="false" android:exported="false" android:label="TomOS SIP" />
+        <service android:name="uk.co.tomos.sip.TomosSipForegroundService" android:foregroundServiceType="phoneCall" android:stopWithTask="false" android:exported="false" android:label="TomOS SIP" />
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
