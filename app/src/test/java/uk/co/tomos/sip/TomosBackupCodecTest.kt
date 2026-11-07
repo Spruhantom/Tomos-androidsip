@@ -33,6 +33,9 @@ class TomosBackupCodecTest {
         assertThrows(IllegalArgumentException::class.java) {
             TomosBackupCodec.decode("""{"schemaVersion":1,"createdAt":1,"contacts":[]}""")
         }
+        assertThrows(IllegalArgumentException::class.java) {
+            TomosBackupCodec.decode("""{"schemaVersion":1,"createdAt":1,"callHistory":[]}""")
+        }
     }
 
     @Test fun rejectsDuplicateContactIds() {
@@ -42,6 +45,21 @@ class TomosBackupCodecTest {
 
     @Test fun rejectsInvalidContactData() {
         val json = """{"schemaVersion":1,"createdAt":1,"contacts":[{"id":"","name":"Alice","number":"1001"}],"callHistory":[]}"""
+        assertThrows(IllegalArgumentException::class.java) { TomosBackupCodec.decode(json) }
+    }
+
+    @Test fun rejectsDuplicateCallIds() {
+        val json = """{"schemaVersion":1,"createdAt":1,"contacts":[],"callHistory":[{"id":"call-1","peer":"Alice","address":"1001","direction":"Incoming","result":"Completed","startedAt":1,"durationSeconds":0},{"id":"call-1","peer":"Bob","address":"1002","direction":"Incoming","result":"Completed","startedAt":2,"durationSeconds":0}]}"""
+        assertThrows(IllegalArgumentException::class.java) { TomosBackupCodec.decode(json) }
+    }
+
+    @Test fun rejectsNegativeBackupTimestamp() {
+        val json = """{"schemaVersion":1,"createdAt":-1,"contacts":[],"callHistory":[]}"""
+        assertThrows(IllegalArgumentException::class.java) { TomosBackupCodec.decode(json) }
+    }
+
+    @Test fun rejectsMalformedFieldTypes() {
+        val json = """{"schemaVersion":"one","createdAt":1,"contacts":[],"callHistory":[]}"""
         assertThrows(IllegalArgumentException::class.java) { TomosBackupCodec.decode(json) }
     }
 
