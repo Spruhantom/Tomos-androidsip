@@ -203,6 +203,16 @@ class TomSipEngine(context: android.content.Context) {
     var codecStatus by mutableStateOf("Codec preferences apply to new calls.")
         private set
     private val prefs = context.getSharedPreferences("tomos_sip", 0)
+    private val profileStore = SipAccountProfileStore(context)
+    private val credentialStore = SipCredentialStore(context)
+    private val runtimeAccounts = mutableMapOf<String, Account>()
+    private val accountIdsByIdentity = mutableMapOf<String, String>()
+    var sipAccounts by mutableStateOf(profileStore.load())
+        private set
+    var registrationStates by mutableStateOf<Map<String, SipAccountRegistration>>(emptyMap())
+        private set
+    var selectedSipAccountId by mutableStateOf(profileStore.selectedAccountId())
+        private set
     var history by mutableStateOf(prefs.getString("history", "")!!.lines().filter { it.isNotBlank() })
         private set
     var contacts by mutableStateOf(loadContacts())
@@ -264,7 +274,21 @@ class TomSipEngine(context: android.content.Context) {
         if (prefs.getString("contacts_v2", null) == null && contacts.isNotEmpty()) persistContacts(contacts)
         core.addListener(object : CoreListenerStub() {
             override fun onAccountRegistrationStateChanged(core: Core, account: Account, state: RegistrationState, message: String) {
-                registered = state == RegistrationState.Ok
+                val identityKey = account.params.identityAddress?.asStringUriOnly().orEmpty()
+                val profileId = accountIdsByIdentity[identityKey]
+                val stateLabel = when (state) {
+                    RegistrationState.Ok -> "Registered"
+                    RegistrationState.Progress -> "Registering…"
+                    RegistrationState.Failed -> "Registration failed"
+                    RegistrationState.Cleared -> "Not registered"
+                    else -> message
+                }
+                if (profileId != null) {
+                    registrationStates = registrationStates + (profileId to SipAccountRegistration(profileId, stateLabel, message))
+                    registered = registrationStates.values.any { it.state == "Registered" }
+                } else {
+                    registered = state == RegistrationState.Ok
+                }
                 status = when (state) {
                     RegistrationState.Ok -> "Registered"
                     RegistrationState.Progress -> "Registering…"
@@ -313,6 +337,16 @@ class TomSipEngine(context: android.content.Context) {
         })
         core.start()
         refreshAudioCodecs(applySavedPreferences = true)
+        // Restore saved account profiles only when their encrypted credentials are available.
+        sipAccounts.forEach { profile ->
+            runCatching { credentialStore.read(profile.id) }.getOrNull()?.let { secret ->
+                runCatching { configureAccount(profile, secret, makeDefault = false) }
+                    .onFailure { registrationStates = registrationStates + (profile.id to SipAccountRegistration(profile.id, "Configuration failed", it.message.orEmpty())) }
+            } ?: run {
+                registrationStates = registrationStates + (profile.id to SipAccountRegistration(profile.id, "Password required", "Enter the password to register this account again."))
+            }
+        }
+        selectedSipAccountId?.let(::selectOutgoingAccount)
     }
 
     private fun codecId(payloadType: PayloadType): String =
@@ -372,40 +406,110 @@ class TomSipEngine(context: android.content.Context) {
         expirySeconds: String
     ) {
         try {
-            require(username.isNotBlank() && authUsername.isNotBlank() && password.isNotBlank() && domain.isNotBlank()) {
-                "Enter the SIP extension, authentication username, password and server."
-            }
-            val port = sipPort.toIntOrNull() ?: throw IllegalArgumentException("SIP port must be a number.")
-            require(port in 1..65535) { "SIP port must be between 1 and 65535." }
-            val expiry = expirySeconds.toIntOrNull() ?: throw IllegalArgumentException("Registration expiry must be a number.")
-            require(expiry in 60..86400) { "Registration expiry must be between 60 and 86400 seconds." }
             val cleanDomain = domain.trim().removePrefix("sip:").removePrefix("sips:")
-            val auth = Factory.instance().createAuthInfo(authUsername.trim(), username.trim(), password, null, null, cleanDomain)
-            core.addAuthInfo(auth)
-            val params = core.createAccountParams()
-            val identity = Factory.instance().createAddress("sip:$username@$cleanDomain")
-            identity?.displayName = displayName.trim().ifBlank { username.trim() }
-            val server = Factory.instance().createAddress("sip:$cleanDomain")
-            server?.port = port
-            server?.transport = when (transport) {
-                "TCP" -> TransportType.Tcp
-                "TLS" -> TransportType.Tls
-                else -> TransportType.Udp
-            }
-            params.identityAddress = identity
-            params.serverAddress = server
-            params.expires = expiry
-            params.isRegisterEnabled = true
-            val account = core.createAccount(params)
-            core.addAccount(account)
-            core.defaultAccount = account
-            status = "Registering…"
+            val profile = SipAccountProfile(
+                label = displayName.trim().ifBlank { username.trim() },
+                username = username.trim(),
+                authUsername = authUsername.trim(),
+                domain = cleanDomain,
+                transport = runCatching { SipTransport.valueOf(transport.uppercase()) }.getOrDefault(SipTransport.UDP),
+                port = sipPort.toIntOrNull() ?: 0,
+                displayName = displayName.trim().ifBlank { username.trim() },
+                expirySeconds = expirySeconds.toIntOrNull() ?: 0
+            )
+            val validationError = validateSipAccount(profile)
+            require(validationError == null) { validationError ?: "Invalid SIP account." }
+            credentialStore.save(profile.id, password)
+            persistAccountProfile(profile)
+            configureAccount(profile, password, makeDefault = true)
         } catch (e: Exception) { status = e.message ?: "Unable to configure SIP account" }
+    }
+
+    private fun persistAccountProfile(profile: SipAccountProfile) {
+        val updated = sipAccounts.filterNot { it.id == profile.id } + profile
+        profileStore.save(updated)
+        sipAccounts = updated
+    }
+
+    private fun configureAccount(profile: SipAccountProfile, password: String, makeDefault: Boolean) {
+        require(profile.enabled) { "This SIP account is disabled." }
+        val identityText = "sip:${profile.username}@${profile.domain}"
+        val identity = Factory.instance().createAddress(identityText)
+            ?: throw IllegalArgumentException("Invalid SIP identity.")
+        identity.displayName = profile.displayName
+        val server = Factory.instance().createAddress("sip:${profile.domain}")
+            ?: throw IllegalArgumentException("Invalid SIP server.")
+        server.port = profile.port
+        server.transport = when (profile.transport) {
+            SipTransport.TCP -> TransportType.Tcp
+            SipTransport.TLS -> TransportType.Tls
+            SipTransport.UDP -> TransportType.Udp
+        }
+        val auth = Factory.instance().createAuthInfo(
+            profile.authUsername, profile.username, password, null, null, profile.domain
+        )
+        core.addAuthInfo(auth)
+        val params = core.createAccountParams()
+        params.identityAddress = identity
+        params.serverAddress = server
+        params.expires = profile.expirySeconds
+        params.isRegisterEnabled = true
+        val account = core.createAccount(params)
+        core.addAccount(account)
+        val identityKey = identity.asStringUriOnly()
+        runtimeAccounts[profile.id] = account
+        accountIdsByIdentity[identityKey] = profile.id
+        registrationStates = registrationStates + (profile.id to SipAccountRegistration(profile.id, "Registering"))
+        if (makeDefault || core.defaultAccount == null) {
+            selectedSipAccountId = profile.id
+            profileStore.selectAccount(profile.id)
+            core.defaultAccount = account
+        }
+        status = "Registering…"
+    }
+
+    fun selectOutgoingAccount(accountId: String) {
+        val profile = sipAccounts.firstOrNull { it.id == accountId } ?: return
+        val account = runtimeAccounts[accountId] ?: run {
+            registrationStates = registrationStates + (accountId to SipAccountRegistration(accountId, "Password required"))
+            return
+        }
+        core.defaultAccount = account
+        selectedSipAccountId = profile.id
+        profileStore.selectAccount(profile.id)
+    }
+
+    fun removeSipAccount(accountId: String) {
+        if (activeCall && core.currentCall?.params?.account == runtimeAccounts[accountId]) {
+            status = "End the active call before removing this account."
+            return
+        }
+        runtimeAccounts.remove(accountId)?.let { account ->
+            accountIdsByIdentity.remove(account.params.identityAddress?.asStringUriOnly())
+            core.removeAccount(account)
+        }
+        runCatching { credentialStore.delete(accountId) }
+        val updated = sipAccounts.filterNot { it.id == accountId }
+        profileStore.save(updated)
+        sipAccounts = updated
+        registrationStates = registrationStates - accountId
+        if (selectedSipAccountId == accountId) {
+            val next = updated.firstOrNull { runtimeAccounts.containsKey(it.id) }
+            if (next != null) selectOutgoingAccount(next.id) else {
+                selectedSipAccountId = null
+                profileStore.selectAccount(null)
+                core.defaultAccount = null
+            }
+        }
+        registered = registrationStates.values.any { it.state == "Registered" }
     }
 
     fun call(destination: String) {
         try {
-            require(registered) { "Register a SIP account before calling." }
+            val selectedId = selectedSipAccountId
+            require(selectedId != null && registrationStates[selectedId]?.state == "Registered") {
+                "Select a registered SIP account before calling."
+            }
             require(destination.isNotBlank()) { "Enter an extension or SIP address." }
             val target = if (destination.contains("@")) destination.trim() else {
                 val domain = core.defaultAccount?.params?.serverAddress?.domain
