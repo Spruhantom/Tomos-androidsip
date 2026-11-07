@@ -63,7 +63,7 @@ def main():
     for release in releases:
         if release.get("draft"):
             continue
-        match = re.search(r"-build-(\\d+)$", release.get("tag_name", ""))
+        match = re.search(r"-build-(\d+)$", release.get("tag_name", ""))
         apk_asset = next((asset for asset in release.get("assets", [])
                           if asset.get("name", "").lower().endswith(".apk")), None)
         if match and apk_asset:
