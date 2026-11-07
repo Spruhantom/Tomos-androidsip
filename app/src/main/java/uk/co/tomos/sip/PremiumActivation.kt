@@ -36,13 +36,17 @@ class PremiumLicenceVerifier(private val publicKeyPem: String) {
         val payload = JSONObject(String(signedPayload, StandardCharsets.UTF_8))
         if (payload.toString().isBlank()) return false
         val mirroredPayload = document.getJSONObject("payload")
-        if (mirroredPayload.getString("licence_id") != payload.getString("licence_id")) return false
+        if (!mirroredPayload.similar(payload)) return false
         if (payload.getInt("schema") != 1 || payload.getString("product") != PREMIUM_PRODUCT) return false
         if (payload.getString("licence_type") != "lifetime") return false
+        UUID.fromString(payload.getString("licence_id"))
+        require(payload.getString("activation_code_sha256").matches(Regex("[0-9a-f]{64}")))
+        require(payload.getString("issued_at").endsWith("Z"))
         val features = payload.getJSONArray("features")
         val received = (0 until features.length()).map { features.getString(it) }.toSet()
         if (received != PREMIUM_FEATURES) return false
-        val normalizedCode = activationCode.trim().uppercase().replace(" ", "")
+        val normalizedCode = activationCode.filterNot { it.isWhitespace() }.uppercase()
+        require(normalizedCode.matches(Regex("TOMOS-PREM-(?:[A-Z2-7]{4}-){3}[A-Z2-7]{4}")))
         val codeDigest = MessageDigest.getInstance("SHA-256")
             .digest(normalizedCode.toByteArray(StandardCharsets.US_ASCII))
             .joinToString("") { "%02x".format(it) }
@@ -53,9 +57,12 @@ class PremiumLicenceVerifier(private val publicKeyPem: String) {
             .replace("-----END PUBLIC KEY-----", "")
             .filterNot { it.isWhitespace() }
         val encoded = Base64.getDecoder().decode(pemBody)
-        // SubjectPublicKeyInfo for Ed25519 ends with the 32-byte raw public key.
-        if (encoded.size < 32) return false
-        val rawKey = encoded.copyOfRange(encoded.size - 32, encoded.size)
+        // Require the exact Ed25519 SubjectPublicKeyInfo encoding, not merely
+        // an arbitrary DER value whose final 32 bytes happen to look like a key.
+        val spkiPrefix = byteArrayOf(0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00)
+        if (encoded.size != spkiPrefix.size + 32) return false
+        if (!encoded.copyOfRange(0, spkiPrefix.size).contentEquals(spkiPrefix)) return false
+        val rawKey = encoded.copyOfRange(spkiPrefix.size, encoded.size)
         val signer = Ed25519Signer()
         signer.init(false, Ed25519PublicKeyParameters(rawKey, 0))
         signer.update(signedPayload, 0, signedPayload.size)
