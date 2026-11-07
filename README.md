@@ -11,6 +11,8 @@ A TomOS-branded Android SIP softphone built with Kotlin, Jetpack Compose and the
 - Locally stored contacts with one-tap calling and recent call history.
 - Advanced SIP account settings for authentication username, caller ID/display name, server port and registration expiry.
 - GitHub release update checker with version comparison, direct APK download, and Android package-installer handoff.
+- Application-scoped Linphone Core ownership with a TomOS foreground service holding the same engine instance while the UI is backgrounded.
+- Validated-network monitoring, debounced registration refresh after network handovers, and bounded registration retries after failures.
 - Audio codec controls for enabling/disabling every audio codec exposed by the bundled Linphone SDK; codec preferences are saved locally and used for new calls.
 
 ## Build
@@ -35,7 +37,8 @@ The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`. Main-br
 
 ## Current limitations / validation
 - Advanced SIP settings are applied when registering the account. Confirm the configured port, authentication ID and registration expiry against your PBX.
-- The Linphone SDK CoreService has been declared as an Android phone-call foreground service. Real-device testing is still required to confirm background registration and incoming-call delivery across Android versions and OEM battery policies.
+- TomOS starts a dedicated sticky phone-call foreground service that references the same application-scoped TomSipEngine used by the UI; it deliberately does not start Linphone CoreService, which would own a separate Core. On process recreation, the Application rebuilds the SIP Core from saved account profiles and the sticky service is recreated by Android. Real-device testing is still required to confirm background registration and incoming-call delivery across Android versions and OEM battery policies. Force-stop, user-restricted background execution, and some OEM battery policies can still prevent automatic restart.
+- Network recovery waits for Android to report a validated internet connection, debounces handovers, and limits automatic retries after registration failures. Linphone's own SIP transaction/registration retry behavior remains active between these explicit recovery attempts.
 - Incoming-call notifications require notification permission on Android 13 and later.
 - Test calls, audio routing, registration, NAT traversal and TLS against a real PBX before production use.
 - Asterisk uses standard SIP/PJSIP registration; deployment-specific host, port, transport, extension/auth ID, password and TLS settings must be supplied for end-to-end validation.

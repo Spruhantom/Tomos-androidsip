@@ -6,14 +6,20 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.SystemClock
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import java.io.File
 import androidx.core.content.FileProvider
 import androidx.core.app.NotificationCompat
+import androidx.core.app.Person
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -46,6 +52,9 @@ import kotlinx.coroutines.delay
 import org.json.JSONArray
 import java.net.HttpURLConnection
 import java.net.URL
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 private val Void = Color(0xFF090A12)
 private val Panel = Color(0xFF151725)
@@ -57,6 +66,7 @@ private data class GitHubUpdate(val buildCode: Int, val releaseName: String, val
 
 data class AudioCodecOption(val id: String, val label: String, val details: String, val enabled: Boolean)
 data class SipContact(val id: String, val name: String, val number: String)
+data class SipCallRecord(val id: String, val peer: String, val address: String, val direction: String, val result: String, val startedAt: Long, val durationSeconds: Long)
 
 private fun normalizeSipIdentity(value: String): String {
     val withoutScheme = value.trim().removePrefix("sip:").removePrefix("sips:")
@@ -172,7 +182,15 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             notificationPermissionRequest.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
-        sip = TomSipEngine(applicationContext)
+        sip = (application as TomosSipApplication).sipEngine
+        // Start TomOS's service for the exact application-owned SIP engine. Starting
+        // Linphone CoreService here would create a second, unrelated Core.
+        val serviceIntent = Intent(this, TomosSipForegroundService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            ContextCompat.startForegroundService(this, serviceIntent)
+        } else {
+            startService(serviceIntent)
+        }
         handleCallAction(intent)
         setContent { TomSipScreen(sip!!) }
     }
@@ -190,7 +208,9 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    override fun onDestroy() { sip?.shutdown(); sip = null; super.onDestroy() }
+    // The Application owns the SIP engine. Destroying/recreating this Activity must
+    // never stop the Core or drop active registrations/calls.
+    override fun onDestroy() { sip = null; super.onDestroy() }
 }
 
 class TomSipEngine(context: android.content.Context) {
@@ -230,10 +250,52 @@ class TomSipEngine(context: android.content.Context) {
         private set
     var selectedSipAccountId by mutableStateOf(profileStore.selectedAccountId())
         private set
-    var history by mutableStateOf(prefs.getString("history", "")!!.lines().filter { it.isNotBlank() })
+    var history by mutableStateOf(loadCallHistory())
         private set
+    private var callStartedAtEpochMillis = 0L
+    private var callConnectedAtElapsedMillis = 0L
+    private var callDirection = "Outgoing"
+    private var callWasConnected = false
+    private var callHistoryFinalized = true
     var contacts by mutableStateOf(loadContacts())
         private set
+
+    private fun loadCallHistory(): List<SipCallRecord> {
+        val stored = prefs.getString("call_history_v2", null)
+        if (stored != null) return runCatching {
+            val json = JSONArray(stored)
+            (0 until json.length()).mapNotNull { index ->
+                val item = json.optJSONObject(index) ?: return@mapNotNull null
+                SipCallRecord(
+                    item.optString("id"), item.optString("peer"), item.optString("address"),
+                    item.optString("direction"), item.optString("result"),
+                    item.optLong("startedAt"), item.optLong("durationSeconds")
+                )
+            }
+        }.getOrDefault(emptyList())
+        // Preserve legacy entries as imported records rather than discarding history.
+        return prefs.getString("history", "").orEmpty().lines().filter { it.isNotBlank() }
+            .mapIndexed { index, line ->
+                val peer = line.substringBefore(" • ")
+                SipCallRecord("legacy-$index", peer, peer, "Unknown", line.substringAfter(" • ", "Previous call"), 0L, 0L)
+            }
+    }
+
+    private fun persistCallHistory(records: List<SipCallRecord>) {
+        val json = JSONArray()
+        records.forEach { record ->
+            json.put(org.json.JSONObject()
+                .put("id", record.id).put("peer", record.peer).put("address", record.address)
+                .put("direction", record.direction).put("result", record.result)
+                .put("startedAt", record.startedAt).put("durationSeconds", record.durationSeconds))
+        }
+        prefs.edit().putString("call_history_v2", json.toString()).apply()
+        history = records
+    }
+
+    fun deleteCallRecord(id: String) = persistCallHistory(history.filterNot { it.id == id })
+    fun clearCallHistory() = persistCallHistory(emptyList())
+    fun callBack(record: SipCallRecord) = call(record.address)
 
     private fun loadContacts(): List<SipContact> {
         val structured = prefs.getString("contacts_v2", null)
@@ -286,6 +348,34 @@ class TomSipEngine(context: android.content.Context) {
 
     fun deleteContact(id: String) = persistContacts(contacts.filterNot { it.id == id })
     private val appContext = context
+    private val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+    private var networkCallbackRegistered = false
+    private val recoveryHandler = Handler(Looper.getMainLooper())
+    private var pendingNetworkRefresh: Runnable? = null
+    private var pendingRegistrationRetry: Runnable? = null
+    private var registrationRetryAttempt = 0
+    private val maxRegistrationRetries = 3
+    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+            // Wait for validated internet; Wi-Fi association alone does not mean
+            // the PBX can be reached (captive portals and no-internet networks).
+            scheduleNetworkRecoveryIfUsable()
+        }
+        override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
+            if (capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) {
+                scheduleNetworkRecoveryIfUsable()
+            } else {
+                pendingNetworkRefresh?.let(recoveryHandler::removeCallbacks)
+                pendingNetworkRefresh = null
+            }
+        }
+        override fun onLost(network: Network) {
+            // Do not refresh on loss; wait for a replacement validated route.
+            pendingNetworkRefresh?.let(recoveryHandler::removeCallbacks)
+            pendingNetworkRefresh = null
+        }
+    }
 
     init {
         if (prefs.getString("contacts_v2", null) == null && contacts.isNotEmpty()) persistContacts(contacts)
@@ -303,6 +393,13 @@ class TomSipEngine(context: android.content.Context) {
                 if (profileId != null) {
                     registrationStates = registrationStates + (profileId to SipAccountRegistration(profileId, stateLabel, message))
                     registered = registrationStates.values.any { it.state == "Registered" }
+                    if (state == RegistrationState.Ok) {
+                        registrationRetryAttempt = 0
+                        pendingRegistrationRetry?.let(recoveryHandler::removeCallbacks)
+                        pendingRegistrationRetry = null
+                    } else if (state == RegistrationState.Failed) {
+                        scheduleRegistrationRetry()
+                    }
                 } else {
                     registered = state == RegistrationState.Ok
                 }
@@ -317,20 +414,31 @@ class TomSipEngine(context: android.content.Context) {
             }
             override fun onCallStateChanged(core: Core, call: Call, state: Call.State, message: String) {
                 val remoteName = resolveCallerName(call.remoteAddress?.username, call.remoteAddress?.displayName)
-                if (state == Call.State.IncomingReceived || state == Call.State.IncomingEarlyMedia) {
-                    incomingCaller = remoteName
+                val incomingState = state == Call.State.IncomingReceived || state == Call.State.IncomingEarlyMedia
+                val outgoingState = state == Call.State.OutgoingInit || state == Call.State.OutgoingProgress || state == Call.State.OutgoingRinging
+                if (incomingState || outgoingState) {
+                    if (callStartedAtEpochMillis == 0L || callHistoryFinalized) {
+                        callStartedAtEpochMillis = System.currentTimeMillis()
+                        callConnectedAtElapsedMillis = 0L
+                        callWasConnected = false
+                        callHistoryFinalized = false
+                        callDirection = if (incomingState) "Incoming" else "Outgoing"
+                    }
                     activeCallName = remoteName
                     activeCall = true
-                    postIncomingNotification(remoteName)
                 }
-                if (state == Call.State.OutgoingInit || state == Call.State.OutgoingProgress || state == Call.State.OutgoingRinging) {
-                    activeCallName = remoteName
-                    activeCall = true
+                if (incomingState) {
+                    incomingCaller = remoteName
+                    postIncomingNotification(remoteName)
                 }
                 if (state == Call.State.Connected || state == Call.State.StreamsRunning) {
                     incomingCaller = null
                     activeCall = true
-                    if (callStartedAtMillis == 0L) callStartedAtMillis = SystemClock.elapsedRealtime()
+                    callWasConnected = true
+                    if (callConnectedAtElapsedMillis == 0L) {
+                        callConnectedAtElapsedMillis = SystemClock.elapsedRealtime()
+                        callStartedAtMillis = callConnectedAtElapsedMillis
+                    }
                 }
                 if (state == Call.State.Paused) activeCall = true
                 if (state == Call.State.End || state == Call.State.Released || state == Call.State.Error) {
@@ -338,8 +446,25 @@ class TomSipEngine(context: android.content.Context) {
                     notificationManager().cancel(1001)
                     activeCall = false
                     callStartedAtMillis = 0L
-                    history = (listOf((call.remoteAddress?.username ?: "Unknown") + " • " + state.name) + history).take(50)
-                    prefs.edit().putString("history", history.joinToString("\n")).apply()
+                    if (!callHistoryFinalized && callStartedAtEpochMillis > 0L) {
+                        val address = call.remoteAddress?.asStringUriOnly() ?: call.remoteAddress?.username ?: "Unknown"
+                        val peer = resolveCallerName(call.remoteAddress?.username, call.remoteAddress?.displayName)
+                        val duration = if (callWasConnected && callConnectedAtElapsedMillis > 0L)
+                            ((SystemClock.elapsedRealtime() - callConnectedAtElapsedMillis) / 1000L).coerceAtLeast(0L) else 0L
+                        val result = when {
+                            state == Call.State.Error -> "Failed"
+                            callDirection == "Incoming" && !callWasConnected -> "Missed"
+                            callWasConnected -> "Completed"
+                            else -> "Cancelled"
+                        }
+                        val record = SipCallRecord(
+                            java.util.UUID.randomUUID().toString(), peer, address, callDirection,
+                            result, callStartedAtEpochMillis, duration
+                        )
+                        persistCallHistory((listOf(record) + history).take(100))
+                        callHistoryFinalized = true
+                        callStartedAtEpochMillis = 0L
+                    }
                 }
                 callStatus = when (state) {
                     Call.State.OutgoingInit, Call.State.OutgoingProgress -> "Calling…"
@@ -353,6 +478,12 @@ class TomSipEngine(context: android.content.Context) {
             }
         })
         core.start()
+        // Re-attempt SIP registration when Android reports a new default network.
+        // Keep the callback for the lifetime of the application-owned SIP engine.
+        runCatching {
+            connectivityManager.registerDefaultNetworkCallback(networkCallback)
+            networkCallbackRegistered = true
+        }
         refreshAudioCodecs(applySavedPreferences = true)
         // Restore saved account profiles only when their encrypted credentials are available.
         sipAccounts.forEach { profile ->
@@ -364,6 +495,44 @@ class TomSipEngine(context: android.content.Context) {
             }
         }
         selectedSipAccountId?.let(::selectOutgoingAccount)
+    }
+
+    private fun hasValidatedInternet(): Boolean {
+        val network = connectivityManager.activeNetwork ?: return false
+        val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return false
+        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+    }
+
+    private fun scheduleNetworkRecoveryIfUsable() {
+        if (!hasValidatedInternet()) return
+        pendingNetworkRefresh?.let(recoveryHandler::removeCallbacks)
+        val refresh = Runnable {
+            pendingNetworkRefresh = null
+            if (hasValidatedInternet()) {
+                registrationRetryAttempt = 0
+                pendingRegistrationRetry?.let(recoveryHandler::removeCallbacks)
+                pendingRegistrationRetry = null
+                runCatching { core.refreshRegisters() }
+            }
+        }
+        pendingNetworkRefresh = refresh
+        recoveryHandler.postDelayed(refresh, 1_500L)
+    }
+
+    private fun scheduleRegistrationRetry() {
+        if (pendingRegistrationRetry != null || registrationRetryAttempt >= maxRegistrationRetries) return
+        val delayMillis = 5_000L * (1L shl registrationRetryAttempt)
+        registrationRetryAttempt += 1
+        val retry = Runnable {
+            pendingRegistrationRetry = null
+            // Avoid retrying while Android has no active default network.
+            if (hasValidatedInternet()) {
+                runCatching { core.refreshRegisters() }
+            }
+        }
+        pendingRegistrationRetry = retry
+        recoveryHandler.postDelayed(retry, delayMillis)
     }
 
     private fun codecId(payloadType: PayloadType): String =
@@ -695,7 +864,7 @@ class TomSipEngine(context: android.content.Context) {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
         }
-        val notification = NotificationCompat.Builder(appContext, "incoming_calls")
+        val notificationBuilder = NotificationCompat.Builder(appContext, "incoming_calls")
             .setSmallIcon(android.R.drawable.sym_call_incoming)
             .setContentTitle("TomOS SIP • Incoming call")
             .setContentText(caller)
@@ -704,12 +873,28 @@ class TomSipEngine(context: android.content.Context) {
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setOngoing(true)
             .setAutoCancel(false)
-            .setTimeoutAfter(60_000L)
+            // IncomingEarlyMedia can follow IncomingReceived. Updating the same
+            // notification must not restart its ringtone/vibration each time.
+            .setOnlyAlertOnce(true)
             .setContentIntent(fullScreenIntent)
             .setFullScreenIntent(fullScreenIntent, true)
-            .addAction(android.R.drawable.sym_action_call, "Answer", answerIntent)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Decline", declineIntent)
-            .build()
+
+        val notification = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val callerPerson = Person.Builder()
+                .setName(caller)
+                .setImportant(true)
+                .build()
+            notificationBuilder
+                .setStyle(NotificationCompat.CallStyle.forIncomingCall(
+                    callerPerson, declineIntent, answerIntent
+                ))
+                .build()
+        } else {
+            notificationBuilder
+                .addAction(android.R.drawable.sym_action_call, "Answer", answerIntent)
+                .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Decline", declineIntent)
+                .build()
+        }
         manager.notify(1001, notification)
     }
     fun accept() {
@@ -728,6 +913,14 @@ class TomSipEngine(context: android.content.Context) {
     fun hangup() { core.currentCall?.terminate(); callStatus = "Call ended" }
     fun shutdown() {
         try {
+            pendingNetworkRefresh?.let(recoveryHandler::removeCallbacks)
+            pendingNetworkRefresh = null
+            pendingRegistrationRetry?.let(recoveryHandler::removeCallbacks)
+            pendingRegistrationRetry = null
+            if (networkCallbackRegistered) {
+                connectivityManager.unregisterNetworkCallback(networkCallback)
+                networkCallbackRegistered = false
+            }
             notificationManager().cancel(1001)
             notificationManager().cancel(1002)
             core.stop()
@@ -1034,9 +1227,29 @@ private fun TomSipScreen(engine: TomSipEngine) {
             if (selectedTab == "History") {
             Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(20.dp)) {
                 Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("RECENT CALLS", color = Cyan, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("RECENT CALLS", color = Cyan, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+                        Spacer(Modifier.weight(1f))
+                        if (engine.history.isNotEmpty()) TextButton(onClick = { engine.clearCallHistory() }) {
+                            Text("CLEAR ALL", color = Pink, fontSize = 11.sp)
+                        }
+                    }
                     if (engine.history.isEmpty()) Text("No calls yet", color = Muted)
-                    engine.history.take(10).forEach { Text(it, color = Color.White, fontSize = 13.sp) }
+                    engine.history.take(50).forEach { record ->
+                        Row(Modifier.fillMaxWidth().padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                Text(record.peer, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                                val dateLabel = if (record.startedAt > 0L)
+                                    SimpleDateFormat("dd MMM yyyy, HH:mm", Locale.getDefault()).format(Date(record.startedAt))
+                                    else "Imported history"
+                                Text("${record.direction} • ${record.result} • $dateLabel", color = Muted, fontSize = 11.sp)
+                                Text("Duration: ${record.durationSeconds / 60}m ${record.durationSeconds % 60}s", color = Muted, fontSize = 11.sp)
+                            }
+                            TextButton(onClick = { engine.callBack(record) }) { Text("CALL", color = Cyan) }
+                            TextButton(onClick = { engine.deleteCallRecord(record.id) }) { Text("✕", color = Pink) }
+                        }
+                        Divider(color = Color(0xFF303448))
+                    }
                 }
             }
             }
