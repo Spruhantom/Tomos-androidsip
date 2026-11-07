@@ -46,6 +46,20 @@ Use this checklist with a test PBX and non-production SIP accounts. Record the d
 - [ ] Receive a call from a saved extension and confirm the saved contact name appears on the incoming-call screen and notification.
 - [ ] Receive a call from an unknown extension and confirm the PBX display name or SIP username is used as the fallback.
 
+
+## Multiple SIP accounts
+
+- [ ] Add a first SIP account and confirm it registers.
+- [ ] Add a second SIP account on a different extension or PBX and confirm both remain registered.
+- [ ] Confirm a registration failure on one account does not mark the other account offline.
+- [ ] Select each registered account and place a call; verify the caller identity and short-extension domain use the selected account.
+- [ ] Receive calls on each account and confirm the PBX routes them to the correct handset/app session.
+- [ ] Restart the app and confirm saved account profiles restore; re-enter credentials if Android Keystore keys are unavailable after restore.
+- [ ] Update an existing account and confirm it does not create a duplicate registration.
+- [ ] Remove an account while idle and confirm other account registrations remain active.
+- [ ] Confirm account removal is blocked while a call is active.
+- [ ] Confirm no SIP password appears in logs, profile JSON, preferences in plaintext or exported diagnostics.
+
 ## Audio and media
 
 - [ ] Verify two-way audio on a normal call.
