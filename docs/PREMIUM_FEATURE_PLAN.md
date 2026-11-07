@@ -93,13 +93,16 @@ If TomOS SIP is later distributed through Google Play, in-app purchases for digi
 - Initial Premium features: multiple SIP accounts, advanced codec controls and encrypted backups.
 - Still to decide: price, payment provider, device activation limit, refund policy, offline grace period and lifetime service-continuity policy.
 
-### Phase 1 — entitlement foundation (no paywall yet)
+### Phase 1 — entitlement foundation (in progress; no paywall yet)
 
-- Add a pure Kotlin feature catalogue and entitlement model.
-- Add an injectable repository with a default Free implementation.
-- Add unit tests for Free, Premium, expired, unknown and verification-error states.
-- Add feature guards at domain/service boundaries.
+- [x] Add a pure Kotlin feature catalogue for the three confirmed Premium features.
+- [x] Add an entitlement status model, lifetime/expiry evaluation and an injectable repository boundary.
+- [x] Add a safe default repository that grants Free only until a licence has been verified.
+- [x] Add unit tests for Free, lifetime Premium, expiry boundaries, unknown and verification-error states.
+- [ ] Add feature guards at domain/service boundaries after a verified activation flow is available.
 - Keep all current functionality enabled during this phase; this avoids accidentally locking out users before purchase infrastructure exists.
+
+The initial implementation is in `PremiumEntitlements.kt` with tests in `PremiumEntitlementsTest.kt`. It deliberately does not claim that a locally stored flag is a valid purchase. The current production app wiring remains Free until the signed-token verification service is implemented.
 
 ### Phase 2 — premium UX
 
