@@ -2,6 +2,12 @@ package uk.co.tomos.sip
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.Context
+import android.os.Build
+import androidx.core.app.NotificationCompat
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -36,10 +42,14 @@ private val Muted = Color(0xFF9BA3B8)
 class MainActivity : ComponentActivity() {
     private var sip: TomSipEngine? = null
     private val permissionRequest = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    private val notificationPermissionRequest = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             permissionRequest.launch(Manifest.permission.RECORD_AUDIO)
+        }
+        if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            notificationPermissionRequest.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
         sip = TomSipEngine(applicationContext)
         setContent { TomSipScreen(sip!!) }
@@ -55,6 +65,20 @@ class TomSipEngine(context: android.content.Context) {
         private set
     var registered by mutableStateOf(false)
         private set
+    var incomingCaller by mutableStateOf<String?>(null)
+        private set
+    var muted by mutableStateOf(false)
+        private set
+    var held by mutableStateOf(false)
+        private set
+    var speaker by mutableStateOf(false)
+        private set
+    private val prefs = context.getSharedPreferences("tomos_sip", 0)
+    var history by mutableStateOf(prefs.getString("history", "")!!.lines().filter { it.isNotBlank() })
+        private set
+    var contacts by mutableStateOf(prefs.getString("contacts", "")!!.lines().filter { it.isNotBlank() })
+        private set
+    private val appContext = context
 
     init {
         core.addListener(object : CoreListenerStub() {
@@ -69,6 +93,16 @@ class TomSipEngine(context: android.content.Context) {
                 }
             }
             override fun onCallStateChanged(core: Core, call: Call, state: Call.State, message: String) {
+                if (state == Call.State.IncomingReceived || state == Call.State.IncomingEarlyMedia) {
+                    incomingCaller = call.remoteAddress?.username ?: "Unknown caller"
+                    postIncomingNotification(incomingCaller ?: "Incoming call")
+                }
+                if (state == Call.State.Connected || state == Call.State.StreamsRunning) incomingCaller = null
+                if (state == Call.State.End || state == Call.State.Released || state == Call.State.Error) {
+                    incomingCaller = null
+                    history = (listOf((call.remoteAddress?.username ?: "Unknown") + " • " + state.name) + history).take(50)
+                    prefs.edit().putString("history", history.joinToString("\n")).apply()
+                }
                 callStatus = when (state) {
                     Call.State.OutgoingInit, Call.State.OutgoingProgress -> "Calling…"
                     Call.State.OutgoingRinging -> "Ringing…"
@@ -122,6 +156,28 @@ class TomSipEngine(context: android.content.Context) {
         } catch (e: Exception) { callStatus = e.message ?: "Call failed" }
     }
 
+    private fun postIncomingNotification(caller: String) {
+        if (Build.VERSION.SDK_INT >= 33 && androidx.core.content.ContextCompat.checkSelfPermission(appContext, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
+        val manager = appContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        if (Build.VERSION.SDK_INT >= 26) manager.createNotificationChannel(NotificationChannel("incoming_calls", "Incoming calls", NotificationManager.IMPORTANCE_HIGH))
+        val intent = appContext.packageManager.getLaunchIntentForPackage(appContext.packageName)
+        val pending = intent?.let { PendingIntent.getActivity(appContext, 0, it, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE) }
+        val notification = NotificationCompat.Builder(appContext, "incoming_calls")
+            .setSmallIcon(android.R.drawable.sym_call_incoming).setContentTitle("TomOS SIP • Incoming call")
+            .setContentText(caller).setCategory(NotificationCompat.CATEGORY_CALL)
+            .setPriority(NotificationCompat.PRIORITY_MAX).setAutoCancel(true).setContentIntent(pending).build()
+        manager.notify(1001, notification)
+    }
+    fun accept() { core.currentCall?.accept(); incomingCaller = null }
+    fun decline() { core.currentCall?.decline(Reason.Declined); incomingCaller = null }
+    fun toggleMute() { muted = !muted; core.setMicEnabled(!muted) }
+    fun toggleHold() { val call = core.currentCall ?: return; if (held) call.resume() else call.pause(); held = !held }
+    fun toggleSpeaker() { speaker = !speaker; val target = if (speaker) AudioDevice.Type.Speaker else AudioDevice.Type.Earpiece; core.setOutputAudioDevice(core.audioDevices.firstOrNull { it.type == target }) }
+    fun addContact(name: String, number: String) {
+        if (name.isBlank() || number.isBlank()) return
+        contacts = (contacts + "$name • $number").distinct()
+        prefs.edit().putString("contacts", contacts.joinToString("\n")).apply()
+    }
     fun hangup() { core.currentCall?.terminate(); callStatus = "Call ended" }
     fun shutdown() { try { core.stop() } catch (_: Exception) { } }
 }
@@ -134,6 +190,8 @@ private fun TomSipScreen(engine: TomSipEngine) {
     var transport by remember { mutableStateOf("UDP") }
     var destination by remember { mutableStateOf("") }
     var showSettings by remember { mutableStateOf(true) }
+    var contactName by remember { mutableStateOf("") }
+    var contactNumber by remember { mutableStateOf("") }
 
     MaterialTheme(colorScheme = darkColorScheme(
         primary = Pink, secondary = Cyan, background = Void, surface = Panel,
@@ -179,10 +237,48 @@ private fun TomSipScreen(engine: TomSipEngine) {
                         Text(engine.callStatus, color = Muted, fontSize = 12.sp)
                     }
                     OutlinedTextField(destination, { destination = it }, Modifier.fillMaxWidth(), label = { Text("Extension or SIP address") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone), colors = fieldColors())
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(selected = engine.muted, onClick = { engine.toggleMute() }, label = { Text(if (engine.muted) "MUTED" else "MUTE") })
+                        FilterChip(selected = engine.speaker, onClick = { engine.toggleSpeaker() }, label = { Text("SPEAKER") })
+                        FilterChip(selected = engine.held, onClick = { engine.toggleHold() }, label = { Text(if (engine.held) "RESUME" else "HOLD") })
+                    }
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Button(onClick = { engine.call(destination) }, Modifier.weight(1f).height(52.dp), colors = ButtonDefaults.buttonColors(containerColor = Pink), shape = RoundedCornerShape(14.dp)) { Text("CALL", fontWeight = FontWeight.Bold, letterSpacing = 1.sp) }
                         OutlinedButton(onClick = { engine.hangup() }, Modifier.weight(1f).height(52.dp), colors = ButtonDefaults.outlinedButtonColors(contentColor = Cyan), shape = RoundedCornerShape(14.dp)) { Text("END CALL", fontWeight = FontWeight.Bold) }
                     }
+                }
+            }
+            if (engine.incomingCaller != null) {
+                Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF252039)), shape = RoundedCornerShape(20.dp)) {
+                    Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("INCOMING CALL", color = Cyan, fontWeight = FontWeight.Bold)
+                        Text(engine.incomingCaller ?: "", color = Color.White, fontSize = 20.sp)
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Button(onClick = { engine.accept() }, Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = Cyan, contentColor = Void)) { Text("ANSWER") }
+                            Button(onClick = { engine.decline() }, Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = Pink)) { Text("DECLINE") }
+                        }
+                    }
+                }
+            }
+            Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(20.dp)) {
+                Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("CONTACTS", color = Cyan, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+                    OutlinedTextField(contactName, { contactName = it }, Modifier.fillMaxWidth(), label = { Text("Contact name") }, singleLine = true, colors = fieldColors())
+                    OutlinedTextField(contactNumber, { contactNumber = it }, Modifier.fillMaxWidth(), label = { Text("Extension / SIP number") }, singleLine = true, colors = fieldColors())
+                    Button(onClick = { engine.addContact(contactName, contactNumber); contactName = ""; contactNumber = "" }, Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Pink)) { Text("SAVE CONTACT") }
+                    engine.contacts.forEach { entry ->
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Text(entry, Modifier.weight(1f), color = Color.White)
+                            TextButton(onClick = { engine.call(entry.substringAfter("•").trim()) }) { Text("CALL", color = Cyan) }
+                        }
+                    }
+                }
+            }
+            Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(20.dp)) {
+                Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("RECENT CALLS", color = Cyan, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+                    if (engine.history.isEmpty()) Text("No calls yet", color = Muted)
+                    engine.history.take(10).forEach { Text(it, color = Color.White, fontSize = 13.sp) }
                 }
             }
             Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(20.dp)) {

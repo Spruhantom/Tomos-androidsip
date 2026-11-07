@@ -1,16 +1,16 @@
 # TomOS SIP for Android
 
-A TomOS-branded Android SIP softphone using the Liblinphone engine.
+A TomOS-branded Android SIP softphone built with Kotlin, Jetpack Compose and the Liblinphone SDK.
 
-## Features in 0.1.0
-- TomOS neon-punk dark interface (pink/cyan accent palette).
-- SIP account registration over UDP, TCP or TLS.
-- Outgoing audio calls and hang-up controls.
-- Registration and call-state feedback.
-- Android microphone permission request.
+## Current features
+- TomOS dark neon-punk interface and official TomOS launcher logo.
+- SIP registration over UDP, TCP and TLS.
+- Outgoing calls, incoming-call in-app controls and high-priority notifications.
+- Mute, speakerphone and hold/resume controls.
+- Locally stored contacts and recent call history.
 
 ## Build
-Open this directory in Android Studio or run:
+Run from the repository root:
 
 ```bash
 gradle --no-daemon --stacktrace assembleDebug
@@ -18,7 +18,10 @@ gradle --no-daemon --stacktrace assembleDebug
 
 The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`.
 
-Liblinphone is distributed under GPLv3. Review its licence and your distribution obligations before publishing or redistributing builds. SIP credentials are currently held in memory only and are not persisted.
+## Current limitations / validation
+- The Linphone SDK CoreService has been declared as an Android phone-call foreground service. Real-device testing is still required to confirm background registration and incoming-call delivery across Android versions and OEM battery policies.
+- Incoming-call notifications require notification permission on Android 13 and later.
+- Test calls, audio routing, registration, NAT traversal and TLS against a real PBX before production use.
+- Asterisk uses standard SIP/PJSIP registration; deployment-specific host, port, transport, extension/auth ID, password and TLS settings must be supplied for end-to-end validation.
 
-## Notes
-This is an initial implementation. Test registration, incoming-call handling, background operation, audio routing, NAT traversal and TLS certificate validation against your actual PBX before production use.
+Liblinphone is distributed under GPLv3. Review its licence and redistribution obligations before publishing binaries.
