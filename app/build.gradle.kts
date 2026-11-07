@@ -9,7 +9,8 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        buildConfigField("String", "TOMOS_PREMIUM_API_URL", "\\"${providers.gradleProperty("tomosPremiumApiUrl").orElse("").get()}\\"")\n        buildConfigField("String", "TOMOS_PREMIUM_PUBLIC_KEY", "\\"${providers.gradleProperty("tomosPremiumPublicKey").orElse("").get()}\\"")
+        buildConfigField("String", "TOMOS_PREMIUM_API_URL", "\"${providers.gradleProperty("tomosPremiumApiUrl").orElse("").get()}\"")
+        buildConfigField("String", "TOMOS_PREMIUM_PUBLIC_KEY", "\"${providers.gradleProperty("tomosPremiumPublicKey").orElse("").get()}\"")
         applicationId = "uk.co.tomos.sip"
         minSdk = 26
         targetSdk = 35
@@ -43,6 +44,8 @@ dependencies {
     implementation("androidx.work:work-runtime-ktx:2.10.0")
     implementation("androidx.media:media:1.2.0")
     implementation("org.linphone:linphone-sdk-android:5.5.38")
-    implementation("com.google.code.gson:gson:2.11.0")\n    implementation("org.bouncycastle:bcprov-jdk18on:1.80")
-    testImplementation("junit:junit:4.13.2")\n    testImplementation("org.bouncycastle:bcprov-jdk18on:1.80")
+    implementation("com.google.code.gson:gson:2.11.0")
+    implementation("org.bouncycastle:bcprov-jdk18on:1.80")
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.bouncycastle:bcprov-jdk18on:1.80")
 }
