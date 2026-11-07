@@ -53,7 +53,7 @@ private val Muted = Color(0xFF9BA3B8)
 
 private data class GitHubUpdate(val buildCode: Int, val releaseName: String, val apkUrl: String)
 
-private data class AudioCodecOption(val id: String, val label: String, val details: String, val enabled: Boolean)
+data class AudioCodecOption(val id: String, val label: String, val details: String, val enabled: Boolean)
 
 private suspend fun fetchGitHubUpdate(): GitHubUpdate? = withContext(Dispatchers.IO) {
     val connection = (URL("https://api.github.com/repos/Spruhantom/Tomos-androidsip/releases?per_page=10").openConnection() as HttpURLConnection)
