@@ -19,6 +19,7 @@ import android.provider.Settings
 import java.io.File
 import androidx.core.content.FileProvider
 import androidx.core.app.NotificationCompat
+import androidx.core.app.Person
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -789,7 +790,7 @@ class TomSipEngine(context: android.content.Context) {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
         }
-        val notification = NotificationCompat.Builder(appContext, "incoming_calls")
+        val notificationBuilder = NotificationCompat.Builder(appContext, "incoming_calls")
             .setSmallIcon(android.R.drawable.sym_call_incoming)
             .setContentTitle("TomOS SIP • Incoming call")
             .setContentText(caller)
@@ -798,12 +799,28 @@ class TomSipEngine(context: android.content.Context) {
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setOngoing(true)
             .setAutoCancel(false)
-            .setTimeoutAfter(60_000L)
+            // IncomingEarlyMedia can follow IncomingReceived. Updating the same
+            // notification must not restart its ringtone/vibration each time.
+            .setOnlyAlertOnce(true)
             .setContentIntent(fullScreenIntent)
             .setFullScreenIntent(fullScreenIntent, true)
-            .addAction(android.R.drawable.sym_action_call, "Answer", answerIntent)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Decline", declineIntent)
-            .build()
+
+        val notification = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val callerPerson = Person.Builder()
+                .setName(caller)
+                .setImportant(true)
+                .build()
+            notificationBuilder
+                .setStyle(NotificationCompat.CallStyle.forIncomingCall(
+                    callerPerson, declineIntent, answerIntent
+                ))
+                .build()
+        } else {
+            notificationBuilder
+                .addAction(android.R.drawable.sym_action_call, "Answer", answerIntent)
+                .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Decline", declineIntent)
+                .build()
+        }
         manager.notify(1001, notification)
     }
     fun accept() {
