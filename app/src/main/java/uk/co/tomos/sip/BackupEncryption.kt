@@ -38,26 +38,34 @@ internal object TomosBackupEncryption {
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, deriveKey(password, salt), GCMParameterSpec(TAG_BITS, nonce))
         cipher.updateAAD(header)
-        val encrypted = cipher.doFinal(plaintext)
-        return header + encrypted
+        return try {
+            val encrypted = cipher.doFinal(plaintext)
+            header + encrypted
+        } finally {
+            password.fill('\\u0000')
+        }
     }
 
     fun decrypt(data: ByteArray, password: CharArray): ByteArray {
-        require(data.size in (HEADER_BYTES + 16)..MAX_ENCRYPTED_BYTES) { "Encrypted backup is incomplete or too large." }
-        require(isEncrypted(data)) { "This is not an encrypted TomOS backup." }
-        require(data[8] == VERSION) { "This encrypted backup version is not supported." }
-        val header = data.copyOfRange(0, HEADER_BYTES)
-        val salt = data.copyOfRange(9, 9 + SALT_BYTES)
-        val nonce = data.copyOfRange(9 + SALT_BYTES, HEADER_BYTES)
         try {
-            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-            cipher.init(Cipher.DECRYPT_MODE, deriveKey(password, salt), GCMParameterSpec(TAG_BITS, nonce))
-            cipher.updateAAD(header)
-            return cipher.doFinal(data.copyOfRange(HEADER_BYTES, data.size)).also {
-                require(it.size <= TomosBackupCodec.MAX_BACKUP_BYTES) { "Decrypted backup is larger than 5 MB." }
+            require(data.size in (HEADER_BYTES + 16)..MAX_ENCRYPTED_BYTES) { "Encrypted backup is incomplete or too large." }
+            require(isEncrypted(data)) { "This is not an encrypted TomOS backup." }
+            require(data[8] == VERSION) { "This encrypted backup version is not supported." }
+            val header = data.copyOfRange(0, HEADER_BYTES)
+            val salt = data.copyOfRange(9, 9 + SALT_BYTES)
+            val nonce = data.copyOfRange(9 + SALT_BYTES, HEADER_BYTES)
+            try {
+                val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+                cipher.init(Cipher.DECRYPT_MODE, deriveKey(password, salt), GCMParameterSpec(TAG_BITS, nonce))
+                cipher.updateAAD(header)
+                return cipher.doFinal(data.copyOfRange(HEADER_BYTES, data.size)).also {
+                    require(it.size <= TomosBackupCodec.MAX_BACKUP_BYTES) { "Decrypted backup is larger than 5 MB." }
+                }
+            } catch (_: AEADBadTagException) {
+                throw IllegalArgumentException("Incorrect password or encrypted backup has been changed.")
             }
-        } catch (_: AEADBadTagException) {
-            throw IllegalArgumentException("Incorrect password or encrypted backup has been changed.")
+        } finally {
+            password.fill('\\u0000')
         }
     }
 
