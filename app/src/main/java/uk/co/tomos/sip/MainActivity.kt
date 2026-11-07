@@ -159,6 +159,7 @@ class TomSipEngine(context: android.content.Context) {
     }
 
     private fun postIncomingNotification(caller: String) {
+        if (Build.VERSION.SDK_INT >= 33 && androidx.core.content.ContextCompat.checkSelfPermission(appContext, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
         val manager = appContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= 26) manager.createNotificationChannel(NotificationChannel("incoming_calls", "Incoming calls", NotificationManager.IMPORTANCE_HIGH))
         val intent = appContext.packageManager.getLaunchIntentForPackage(appContext.packageName)
