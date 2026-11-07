@@ -10,7 +10,7 @@ android {
         applicationId = "uk.co.tomos.sip"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
+        versionCode = providers.gradleProperty("versionCode").orElse("1").get().toInt()
         versionName = "0.1.0"
     }
     buildTypes { release { isMinifyEnabled = false } }
