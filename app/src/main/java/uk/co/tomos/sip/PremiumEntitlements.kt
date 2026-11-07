@@ -31,9 +31,13 @@ data class EntitlementSnapshot(
     val expiresAtEpochMillis: Long? = null
 ) {
     fun grants(feature: PremiumFeature, nowEpochMillis: Long): Boolean {
-        // All features in the initial catalogue are Premium-only.
-        if (feature !in PremiumFeature.entries) return false
-        if (status != EntitlementStatus.PREMIUM_ACTIVE) return false
+        // Every feature currently listed in the initial catalogue is Premium-only.
+        val isPremiumFeature = when (feature) {
+            PremiumFeature.MULTIPLE_SIP_ACCOUNTS,
+            PremiumFeature.ADVANCED_CODEC_CONTROLS,
+            PremiumFeature.ENCRYPTED_BACKUP -> true
+        }
+        if (!isPremiumFeature || status != EntitlementStatus.PREMIUM_ACTIVE) return false
         return expiresAtEpochMillis == null || nowEpochMillis < expiresAtEpochMillis
     }
 
