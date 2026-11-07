@@ -4,17 +4,6 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
-val tomosSigningStoreFile = providers.environmentVariable("TOMOS_SIGNING_STORE_FILE").orNull
-val tomosSigningStorePassword = providers.environmentVariable("TOMOS_SIGNING_STORE_PASSWORD").orNull
-val tomosSigningKeyAlias = providers.environmentVariable("TOMOS_SIGNING_KEY_ALIAS").orNull
-val tomosSigningKeyPassword = providers.environmentVariable("TOMOS_SIGNING_KEY_PASSWORD").orNull
-val hasTomosSigningKey = listOf(
-    tomosSigningStoreFile,
-    tomosSigningStorePassword,
-    tomosSigningKeyAlias,
-    tomosSigningKeyPassword
-).all { !it.isNullOrBlank() }
-
 android {
     namespace = "uk.co.tomos.sip"
     compileSdk = 35
@@ -27,28 +16,10 @@ android {
         versionName = "0.1.0"
     }
 
-    signingConfigs {
-        if (hasTomosSigningKey) {
-            create("tomosCi") {
-                storeFile = file(tomosSigningStoreFile!!)
-                storePassword = tomosSigningStorePassword
-                keyAlias = tomosSigningKeyAlias
-                keyPassword = tomosSigningKeyPassword
-            }
-        }
-    }
-
     buildTypes {
-        getByName("debug") {
-            if (hasTomosSigningKey) {
-                signingConfig = signingConfigs.getByName("tomosCi")
-            }
-        }
+        getByName("debug")
         getByName("release") {
             isMinifyEnabled = false
-            if (hasTomosSigningKey) {
-                signingConfig = signingConfigs.getByName("tomosCi")
-            }
         }
     }
 
