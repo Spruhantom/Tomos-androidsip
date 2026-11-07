@@ -22,14 +22,40 @@ Run from the repository root:
 gradle --no-daemon --stacktrace assembleDebug
 ```
 
-The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`. Main-branch release APKs use the GitHub Actions run number as their Android version code so installed apps can identify newer releases. GitHub Actions caches the Android debug keystore for main-branch builds so successive APK releases retain the same signing identity.
+The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`. Main-branch APKs use the GitHub Actions run number as their Android version code. CI signs published APKs with a persistent keystore supplied through GitHub Actions repository secrets; it does not rely on an ephemeral runner debug key.
 
 ## Installation and updates
-- APKs published before the persistent signing-key cache was introduced may have different debug signatures. Android cannot update one of those installations in place with a differently signed APK.
-- For that one-time transition, back up anything important and uninstall the old TomOS SIP app before installing the first APK built with the persistent signing key. Uninstalling removes app-local contacts and call history.
-- After installing the first APK built with the persistent key, subsequent main-branch APK updates should retain the same signing identity and install as normal updates, provided the Android version code increases.
-- These are debug-signed test builds, not production-signed releases. A production distribution should use a protected release keystore and signing secrets.
+Configure these GitHub Actions repository secrets before building or publishing from `main`:
 
+- `TOMOS_SIGNING_KEY_BASE64`: the signing keystore encoded as one-line Base64.
+- `TOMOS_SIGNING_STORE_PASSWORD`: the keystore password.
+- `TOMOS_SIGNING_KEY_ALIAS`: the key alias.
+- `TOMOS_SIGNING_KEY_PASSWORD`: the key password.
+
+Keep the keystore and passwords private. Never commit them to the repository. Main-branch builds fail closed if any signing secret is missing; pull-request builds from forks may run without secrets, but those APKs are not suitable for updating an installed release.
+
+### Create the signing keystore
+
+On a trusted computer with Java's `keytool` installed, run the following and follow the interactive password prompts:
+
+```bash
+keytool -genkeypair -v -keystore tomos-upload.keystore -alias tomos -keyalg RSA -keysize 4096 -validity 10000
+```
+
+Encode the resulting file as a single-line Base64 value:
+
+- Linux: `base64 -w 0 tomos-upload.keystore`
+- macOS: `base64 < tomos-upload.keystore | tr -d '\\n'`
+- PowerShell: `[Convert]::ToBase64String([IO.File]::ReadAllBytes("tomos-upload.keystore"))`
+
+Copy that output into `TOMOS_SIGNING_KEY_BASE64`. Use the exact keystore password, alias (`tomos`), and key password for the other three secrets. Store a secure offline backup of the keystore and passwords. If this key is lost, future APK updates will be blocked by Android's signing checks. Delete temporary Base64 output from shell history or clipboard after configuring the secret, and never upload the keystore to the repository.
+
+The current public APK was signed with a different, temporary debug certificate. If that original private key is unavailable, Android cannot update that installation in place with a new signing identity. Back up important data (including locally stored contacts and call history) before uninstalling the old app and installing the first APK signed with the persistent keystore.
+
+For that one-time transition only, set the repository Actions variable `TOMOS_ALLOW_SIGNING_MIGRATION` to `true`. The compatibility check will still verify package ID and increasing version code, but will explicitly report that the previous certificate differs. After the first APK signed with the persistent key has been published, immediately remove the variable or set it to `false`. All subsequent builds must match the published APK certificate or CI will fail.
+
+The update check validates package ID, version code and signing certificate. It does not replace installing and updating on a physical Android device.
+ 
 ## Updates and audio codecs
 - The update checker downloads the APK asset from the matching GitHub Release, verifies the download is complete, and opens the Android package installer. Android may ask the user to allow TomOS SIP to install apps from this source.
 - Android still requires the downloaded APK to have the same signing certificate as the installed app and a higher version code. If the installed app was signed with an older, temporary debug key, uninstall it once and install a current main-branch build before testing in-app updates; uninstalling removes app-local contacts and call history.
