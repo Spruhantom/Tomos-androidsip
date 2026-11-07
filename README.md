@@ -34,6 +34,22 @@ Configure these GitHub Actions repository secrets before building or publishing 
 
 Keep the keystore and passwords private. Never commit them to the repository. Main-branch builds fail closed if any signing secret is missing; pull-request builds from forks may run without secrets, but those APKs are not suitable for updating an installed release.
 
+### Create the signing keystore
+
+On a trusted computer with Java's `keytool` installed, run the following and follow the interactive password prompts:
+
+```bash
+keytool -genkeypair -v -keystore tomos-upload.keystore -alias tomos -keyalg RSA -keysize 4096 -validity 10000
+```
+
+Encode the resulting file as a single-line Base64 value:
+
+- Linux: `base64 -w 0 tomos-upload.keystore`
+- macOS: `base64 < tomos-upload.keystore | tr -d '\\n'`
+- PowerShell: `[Convert]::ToBase64String([IO.File]::ReadAllBytes("tomos-upload.keystore"))`
+
+Copy that output into `TOMOS_SIGNING_KEY_BASE64`. Use the exact keystore password, alias (`tomos`), and key password for the other three secrets. Store a secure offline backup of the keystore and passwords. If this key is lost, future APK updates will be blocked by Android's signing checks. Delete temporary Base64 output from shell history or clipboard after configuring the secret, and never upload the keystore to the repository.
+
 The current public APK was signed with a different, temporary debug certificate. If that original private key is unavailable, Android cannot update that installation in place with a new signing identity. Back up important data (including locally stored contacts and call history) before uninstalling the old app and installing the first APK signed with the persistent keystore.
 
 For that one-time transition only, set the repository Actions variable `TOMOS_ALLOW_SIGNING_MIGRATION` to `true`. The compatibility check will still verify package ID and increasing version code, but will explicitly report that the previous certificate differs. After the first APK signed with the persistent key has been published, immediately remove the variable or set it to `false`. All subsequent builds must match the published APK certificate or CI will fail.
