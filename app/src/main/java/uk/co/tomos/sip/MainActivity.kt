@@ -6,7 +6,6 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
-import android.media.AudioManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import android.os.Bundle
@@ -80,7 +79,6 @@ class TomSipEngine(context: android.content.Context) {
     var contacts by mutableStateOf(prefs.getString("contacts", "")!!.lines().filter { it.isNotBlank() })
         private set
     private val appContext = context
-    private val audio = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
     init {
         core.addListener(object : CoreListenerStub() {
@@ -172,9 +170,9 @@ class TomSipEngine(context: android.content.Context) {
     }
     fun accept() { core.currentCall?.accept(); incomingCaller = null }
     fun decline() { core.currentCall?.decline(Reason.Declined); incomingCaller = null }
-    fun toggleMute() { muted = !muted; core.isMicEnabled = !muted }
+    fun toggleMute() { muted = !muted; core.setMicEnabled(!muted) }
     fun toggleHold() { val call = core.currentCall ?: return; if (held) call.resume() else call.pause(); held = !held }
-    fun toggleSpeaker() { speaker = !speaker; audio.mode = AudioManager.MODE_IN_COMMUNICATION; @Suppress("DEPRECATION") run { audio.isSpeakerphoneOn = speaker } }
+    fun toggleSpeaker() { speaker = !speaker; val target = if (speaker) AudioDevice.Type.Speaker else AudioDevice.Type.Earpiece; core.setOutputAudioDevice(core.audioDevices.firstOrNull { it.type == target }) }
     fun addContact(name: String, number: String) {
         if (name.isBlank() || number.isBlank()) return
         contacts = (contacts + "$name • $number").distinct()
