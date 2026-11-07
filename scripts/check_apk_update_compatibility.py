@@ -94,10 +94,18 @@ def main():
     if old_package != package:
         raise RuntimeError(f"Package ID changed: published={old_package}, new={package}")
     if certificate != old_certificate:
-        raise RuntimeError(
-            "APK signing certificate mismatch. Android will reject this as an in-place update. "
-            f"Published={old_certificate}; new={certificate}"
-        )
+        if os.environ.get("TOMOS_ALLOW_SIGNING_MIGRATION", "").lower() == "true":
+            print("SIGNING IDENTITY MIGRATION AUTHORISED")
+            print("The existing public APK uses a different certificate and cannot be updated in place.")
+            print("This build establishes the new persistent signing identity for future updates.")
+        else:
+            raise RuntimeError(
+                "APK signing certificate mismatch. Android will reject this as an in-place update. "
+                "If the old private key is permanently unavailable, configure the new persistent "
+                "signing secrets and set the repository variable TOMOS_ALLOW_SIGNING_MIGRATION=true "
+                "for exactly one migration release. Disable it immediately after that release. "
+                f"Published={old_certificate}; new={certificate}"
+            )
     if old_version != latest_code:
         raise RuntimeError(
             f"Release tag build number {latest_code} does not match APK versionCode {old_version}"
