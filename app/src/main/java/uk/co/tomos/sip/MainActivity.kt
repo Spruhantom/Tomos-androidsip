@@ -106,7 +106,11 @@ private suspend fun fetchGitHubUpdate(): GitHubUpdate? = withContext(Dispatchers
 }
 
 
-private suspend fun downloadUpdateApk(context: Context, update: GitHubUpdate): File = withContext(Dispatchers.IO) {
+private suspend fun downloadUpdateApk(
+    context: Context,
+    update: GitHubUpdate,
+    onProgress: (downloadedBytes: Long, totalBytes: Long) -> Unit
+): File = withContext(Dispatchers.IO) {
     val targetDir = File(context.cacheDir, "updates").apply { mkdirs() }
     val target = File(targetDir, "tomos-sip-build-${update.buildCode}.apk")
     val connection = (URL(update.apkUrl).openConnection() as HttpURLConnection)
@@ -118,14 +122,27 @@ private suspend fun downloadUpdateApk(context: Context, update: GitHubUpdate): F
         connection.setRequestProperty("Accept", "application/octet-stream")
         val response = connection.responseCode
         if (response !in 200..299) throw IllegalStateException("APK download failed (HTTP $response)")
+        val expectedLength = connection.contentLengthLong
+        var downloadedBytes = 0L
         connection.inputStream.use { input ->
-            target.outputStream().buffered().use { output -> input.copyTo(output) }
+            target.outputStream().buffered().use { output ->
+                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    output.write(buffer, 0, count)
+                    downloadedBytes += count
+                    withContext(Dispatchers.Main) {
+                        onProgress(downloadedBytes, expectedLength)
+                    }
+                }
+                output.flush()
+            }
         }
         if (!target.isFile || target.length() < 1_000_000L) {
             target.delete()
             throw IllegalStateException("The downloaded APK is incomplete.")
         }
-        val expectedLength = connection.contentLengthLong
         if (expectedLength > 0 && target.length() != expectedLength) {
             target.delete()
             throw IllegalStateException("APK download was incomplete. Please try again.")
@@ -723,6 +740,8 @@ private fun TomSipScreen(engine: TomSipEngine) {
     val context = LocalContext.current
     val updateScope = rememberCoroutineScope()
     var updateDownloading by remember { mutableStateOf(false) }
+    var updateDownloadedBytes by remember { mutableLongStateOf(0L) }
+    var updateTotalBytes by remember { mutableLongStateOf(-1L) }
     var updateMessage by remember { mutableStateOf("Checking GitHub releases…") }
     var availableUpdate by remember { mutableStateOf<GitHubUpdate?>(null) }
     var updateCheckKey by remember { mutableIntStateOf(0) }
@@ -841,10 +860,15 @@ private fun TomSipScreen(engine: TomSipEngine) {
                                     } else if (!updateDownloading) {
                                         updateScope.launch {
                                             updateDownloading = true
+                                            updateDownloadedBytes = 0L
+                                            updateTotalBytes = -1L
                                             updateMessage = "Downloading TomOS SIP update…"
                                             try {
                                                 val update = availableUpdate ?: return@launch
-                                                val apk = downloadUpdateApk(context, update)
+                                                val apk = downloadUpdateApk(context, update) { downloaded, total ->
+                                                    updateDownloadedBytes = downloaded
+                                                    updateTotalBytes = total
+                                                }
                                                 val apkUri = FileProvider.getUriForFile(
                                                     context,
                                                     "${context.packageName}.fileprovider",
@@ -868,6 +892,37 @@ private fun TomSipScreen(engine: TomSipEngine) {
                                 enabled = !updateDownloading,
                                 colors = ButtonDefaults.buttonColors(containerColor = Pink)
                             ) { Text(if (updateDownloading) "DOWNLOADING…" else "INSTALL UPDATE") }
+                        }
+                    }
+                    if (updateDownloading) {
+                        val progressKnown = updateTotalBytes > 0L
+                        val progress = if (progressKnown) {
+                            (updateDownloadedBytes.toFloat() / updateTotalBytes.toFloat()).coerceIn(0f, 1f)
+                        } else 0f
+                        if (progressKnown) {
+                            LinearProgressIndicator(
+                                progress = { progress },
+                                modifier = Modifier.fillMaxWidth(),
+                                color = Cyan,
+                                trackColor = Color(0xFF303448)
+                            )
+                        } else {
+                            LinearProgressIndicator(
+                                modifier = Modifier.fillMaxWidth(),
+                                color = Cyan,
+                                trackColor = Color(0xFF303448)
+                            )
+                        }
+                        val downloadedMb = updateDownloadedBytes / (1024f * 1024f)
+                        val sizeText = if (progressKnown) {
+                            val totalMb = updateTotalBytes / (1024f * 1024f)
+                            "${"%.1f".format(downloadedMb)} MB of ${"%.1f".format(totalMb)} MB"
+                        } else {
+                            "${"%.1f".format(downloadedMb)} MB downloaded"
+                        }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(sizeText, color = Muted, fontSize = 11.sp)
+                            if (progressKnown) Text("${(progress * 100).toInt()}%", color = Cyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
