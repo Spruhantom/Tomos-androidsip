@@ -60,15 +60,39 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      # Keep the debug signing identity stable for successive main-branch APK releases.
-      # Existing APKs built before this cache was introduced may still require one reinstall.
-      - name: Restore persistent Android debug signing key
-        uses: actions/cache@v4
-        with:
-          path: ~/.android/debug.keystore
-          key: tomos-android-debug-keystore-v1-${{ github.ref == 'refs/heads/main' && 'main' || github.ref }}
-          restore-keys: |
-            tomos-android-debug-keystore-v1-main
+      # Main-branch APKs must use the repository's persistent signing identity.
+      # Pull requests from forks may not receive secrets, so they can still run tests
+      # and build an unsigned-by-project-identity debug APK without publishing it.
+      - name: Prepare persistent Android signing key
+        env:
+          SIGNING_KEY_BASE64: ${{ secrets.TOMOS_SIGNING_KEY_BASE64 }}
+          SIGNING_STORE_PASSWORD: ${{ secrets.TOMOS_SIGNING_STORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.TOMOS_SIGNING_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.TOMOS_SIGNING_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          values=( "$SIGNING_KEY_BASE64" "$SIGNING_STORE_PASSWORD" "$SIGNING_KEY_ALIAS" "$SIGNING_KEY_PASSWORD" )
+          present=0
+          for value in "${values[@]}"; do
+            if [ -n "$value" ]; then present=$((present + 1)); fi
+          done
+          if [ "$present" -eq 0 ] && [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+            echo "Signing secrets are unavailable; this non-main build will use the runner debug key."
+            exit 0
+          fi
+          if [ "$present" -ne 4 ]; then
+            echo "::error::All four TOMOS_SIGNING_* repository secrets must be configured before a main-branch APK can be built."
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/tomos-signing"
+          printf '%s' "$SIGNING_KEY_BASE64" | base64 --decode > "$RUNNER_TEMP/tomos-signing/tomos.keystore"
+          test -s "$RUNNER_TEMP/tomos-signing/tomos.keystore"
+          {
+            echo "TOMOS_SIGNING_STORE_FILE=$RUNNER_TEMP/tomos-signing/tomos.keystore"
+            echo "TOMOS_SIGNING_STORE_PASSWORD=$SIGNING_STORE_PASSWORD"
+            echo "TOMOS_SIGNING_KEY_ALIAS=$SIGNING_KEY_ALIAS"
+            echo "TOMOS_SIGNING_KEY_PASSWORD=$SIGNING_KEY_PASSWORD"
+          } >> "$GITHUB_ENV"
 
       - name: Build debug APK
         run: gradle --no-daemon --stacktrace -PversionCode="${GITHUB_RUN_NUMBER}" assembleDebug
@@ -77,6 +101,9 @@ jobs:
         run: test -s app/build/outputs/apk/debug/app-debug.apk
 
       - name: Check in-place update compatibility
+        if: env.TOMOS_SIGNING_STORE_FILE != ''
+        env:
+          TOMOS_ALLOW_SIGNING_MIGRATION: ${{ vars.TOMOS_ALLOW_SIGNING_MIGRATION }}
         run: python3 scripts/check_apk_update_compatibility.py
 
       - name: Create SHA-256 checksum
