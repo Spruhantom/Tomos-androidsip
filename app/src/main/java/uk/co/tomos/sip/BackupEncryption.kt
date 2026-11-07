@@ -1,6 +1,5 @@
 package uk.co.tomos.sip
 
-import java.io.ByteArrayOutputStream
 import java.security.SecureRandom
 import javax.crypto.AEADBadTagException
 import javax.crypto.Cipher
