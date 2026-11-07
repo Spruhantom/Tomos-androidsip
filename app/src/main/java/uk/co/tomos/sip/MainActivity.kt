@@ -9,6 +9,10 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.os.SystemClock
+import android.provider.Settings
+import java.io.File
+import androidx.core.content.FileProvider
 import androidx.core.app.NotificationCompat
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -37,6 +41,8 @@ import androidx.core.content.ContextCompat
 import org.linphone.core.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import org.json.JSONArray
 import java.net.HttpURLConnection
 import java.net.URL
@@ -47,7 +53,9 @@ private val Pink = Color(0xFFFF2D9B)
 private val Cyan = Color(0xFF20E7F5)
 private val Muted = Color(0xFF9BA3B8)
 
-private data class GitHubUpdate(val buildCode: Int, val releaseName: String, val releaseUrl: String)
+private data class GitHubUpdate(val buildCode: Int, val releaseName: String, val apkUrl: String)
+
+data class AudioCodecOption(val id: String, val label: String, val details: String, val enabled: Boolean)
 
 private suspend fun fetchGitHubUpdate(): GitHubUpdate? = withContext(Dispatchers.IO) {
     val connection = (URL("https://api.github.com/repos/Spruhantom/Tomos-androidsip/releases?per_page=10").openConnection() as HttpURLConnection)
@@ -67,10 +75,12 @@ private suspend fun fetchGitHubUpdate(): GitHubUpdate? = withContext(Dispatchers
             val release = releases.getJSONObject(index)
             if (release.optBoolean("draft", true)) continue
             val assets = release.optJSONArray("assets") ?: continue
-            val hasApk = (0 until assets.length()).any { assetIndex ->
-                assets.getJSONObject(assetIndex).optString("name").endsWith(".apk", ignoreCase = true)
-            }
-            if (!hasApk) continue
+            val apkAsset = (0 until assets.length())
+                .map { assets.getJSONObject(it) }
+                .firstOrNull { it.optString("name").endsWith(".apk", ignoreCase = true) }
+                ?: continue
+            val apkUrl = apkAsset.optString("browser_download_url")
+            if (!apkUrl.startsWith("https://github.com/")) continue
             val tag = release.optString("tag_name")
             val buildCode = Regex("-build-(\\d+)$").find(tag)?.groupValues?.getOrNull(1)?.toIntOrNull()
                 ?: continue
@@ -78,11 +88,42 @@ private suspend fun fetchGitHubUpdate(): GitHubUpdate? = withContext(Dispatchers
                 newest = GitHubUpdate(
                     buildCode,
                     release.optString("name").ifBlank { tag },
-                    release.optString("html_url")
+                    apkUrl
                 )
             }
         }
         newest
+    } finally {
+        connection.disconnect()
+    }
+}
+
+
+private suspend fun downloadUpdateApk(context: Context, update: GitHubUpdate): File = withContext(Dispatchers.IO) {
+    val targetDir = File(context.cacheDir, "updates").apply { mkdirs() }
+    val target = File(targetDir, "tomos-sip-build-${update.buildCode}.apk")
+    val connection = (URL(update.apkUrl).openConnection() as HttpURLConnection)
+    try {
+        connection.connectTimeout = 15_000
+        connection.readTimeout = 60_000
+        connection.instanceFollowRedirects = true
+        connection.setRequestProperty("User-Agent", "TomOS-SIP-Android")
+        connection.setRequestProperty("Accept", "application/octet-stream")
+        val response = connection.responseCode
+        if (response !in 200..299) throw IllegalStateException("APK download failed (HTTP $response)")
+        connection.inputStream.use { input ->
+            target.outputStream().buffered().use { output -> input.copyTo(output) }
+        }
+        if (!target.isFile || target.length() < 1_000_000L) {
+            target.delete()
+            throw IllegalStateException("The downloaded APK is incomplete.")
+        }
+        val expectedLength = connection.contentLengthLong
+        if (expectedLength > 0 && target.length() != expectedLength) {
+            target.delete()
+            throw IllegalStateException("APK download was incomplete. Please try again.")
+        }
+        target
     } finally {
         connection.disconnect()
     }
@@ -116,11 +157,21 @@ class TomSipEngine(context: android.content.Context) {
         private set
     var incomingCaller by mutableStateOf<String?>(null)
         private set
+    var activeCall by mutableStateOf(false)
+        private set
+    var activeCallName by mutableStateOf("Unknown caller")
+        private set
+    var callStartedAtMillis by mutableLongStateOf(0L)
+        private set
     var muted by mutableStateOf(false)
         private set
     var held by mutableStateOf(false)
         private set
     var speaker by mutableStateOf(false)
+        private set
+    var audioCodecs by mutableStateOf<List<AudioCodecOption>>(emptyList())
+        private set
+    var codecStatus by mutableStateOf("Codec preferences apply to new calls.")
         private set
     private val prefs = context.getSharedPreferences("tomos_sip", 0)
     var history by mutableStateOf(prefs.getString("history", "")!!.lines().filter { it.isNotBlank() })
@@ -140,15 +191,32 @@ class TomSipEngine(context: android.content.Context) {
                     RegistrationState.Cleared -> "Not registered"
                     else -> message
                 }
+                updateStatusNotification()
             }
             override fun onCallStateChanged(core: Core, call: Call, state: Call.State, message: String) {
+                val remoteName = call.remoteAddress?.displayName?.takeIf { it.isNotBlank() }
+                    ?: call.remoteAddress?.username?.takeIf { it.isNotBlank() }
+                    ?: "Unknown caller"
                 if (state == Call.State.IncomingReceived || state == Call.State.IncomingEarlyMedia) {
-                    incomingCaller = call.remoteAddress?.username ?: "Unknown caller"
-                    postIncomingNotification(incomingCaller ?: "Incoming call")
+                    incomingCaller = remoteName
+                    activeCallName = remoteName
+                    activeCall = true
+                    postIncomingNotification(remoteName)
                 }
-                if (state == Call.State.Connected || state == Call.State.StreamsRunning) incomingCaller = null
+                if (state == Call.State.OutgoingInit || state == Call.State.OutgoingProgress || state == Call.State.OutgoingRinging) {
+                    activeCallName = remoteName
+                    activeCall = true
+                }
+                if (state == Call.State.Connected || state == Call.State.StreamsRunning) {
+                    incomingCaller = null
+                    activeCall = true
+                    if (callStartedAtMillis == 0L) callStartedAtMillis = SystemClock.elapsedRealtime()
+                }
+                if (state == Call.State.Paused) activeCall = true
                 if (state == Call.State.End || state == Call.State.Released || state == Call.State.Error) {
                     incomingCaller = null
+                    activeCall = false
+                    callStartedAtMillis = 0L
                     history = (listOf((call.remoteAddress?.username ?: "Unknown") + " • " + state.name) + history).take(50)
                     prefs.edit().putString("history", history.joinToString("\n")).apply()
                 }
@@ -160,9 +228,57 @@ class TomSipEngine(context: android.content.Context) {
                     Call.State.End, Call.State.Released, Call.State.Error -> "Call ended"
                     else -> message
                 }
+                updateStatusNotification()
             }
         })
         core.start()
+        refreshAudioCodecs(applySavedPreferences = true)
+    }
+
+    private fun codecId(payloadType: PayloadType): String =
+        "${payloadType.mimeType.lowercase()}/${payloadType.clockRate}/${payloadType.channels}"
+
+    private fun refreshAudioCodecs(applySavedPreferences: Boolean = false) {
+        val payloadTypes = core.audioPayloadTypes
+        if (applySavedPreferences) {
+            val saved = prefs.getStringSet("enabled_audio_codecs", null)
+            if (saved != null) {
+                payloadTypes.forEach { payload ->
+                    payload.enable(codecId(payload) in saved)
+                }
+                if (payloadTypes.none { it.enabled() }) {
+                    payloadTypes.firstOrNull()?.enable(true)
+                }
+            }
+        }
+        audioCodecs = payloadTypes.map { payload ->
+            val rate = if (payload.clockRate >= 1000) "${payload.clockRate / 1000} kHz" else "${payload.clockRate} Hz"
+            val channels = if (payload.channels > 1) " • ${payload.channels} channels" else ""
+            AudioCodecOption(
+                codecId(payload),
+                payload.mimeType.uppercase(),
+                rate + channels,
+                payload.enabled()
+            )
+        }
+    }
+
+    fun setAudioCodecEnabled(id: String, enabled: Boolean) {
+        val payloadTypes = core.audioPayloadTypes
+        val target = payloadTypes.firstOrNull { codecId(it) == id } ?: return
+        if (!enabled && payloadTypes.count { it.enabled() } <= 1) {
+            codecStatus = "At least one audio codec must remain enabled."
+            return
+        }
+        val result = target.enable(enabled)
+        if (result != 0) {
+            codecStatus = "Linphone could not change this codec."
+            return
+        }
+        val enabledIds = payloadTypes.filter { it.enabled() }.map { codecId(it) }.toSet()
+        prefs.edit().putStringSet("enabled_audio_codecs", enabledIds).apply()
+        codecStatus = "Codec preferences saved. They apply to new calls."
+        refreshAudioCodecs()
     }
 
     fun register(
@@ -223,16 +339,58 @@ class TomSipEngine(context: android.content.Context) {
         } catch (e: Exception) { callStatus = e.message ?: "Call failed" }
     }
 
+    private fun notificationManager(): NotificationManager =
+        appContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+    private fun canPostNotifications(): Boolean =
+        Build.VERSION.SDK_INT < 33 ||
+            androidx.core.content.ContextCompat.checkSelfPermission(appContext, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+
+    private fun appPendingIntent(): PendingIntent? {
+        val intent = appContext.packageManager.getLaunchIntentForPackage(appContext.packageName) ?: return null
+        return PendingIntent.getActivity(appContext, 1002, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+    }
+
+    private fun updateStatusNotification() {
+        if (!canPostNotifications()) return
+        val manager = notificationManager()
+        if (Build.VERSION.SDK_INT >= 26) {
+            manager.createNotificationChannel(
+                NotificationChannel("sip_status", "SIP connection", NotificationManager.IMPORTANCE_LOW).apply {
+                    description = "Shows TomOS SIP registration and active-call status"
+                    setShowBadge(false)
+                }
+            )
+        }
+        if (!registered && !activeCall) {
+            manager.cancel(1002)
+            return
+        }
+        val title = if (activeCall) "TomOS SIP • $callStatus" else "TomOS SIP • Registered"
+        val detail = if (activeCall) {
+            if (callStartedAtMillis > 0L) activeCallName else "Call with $activeCallName"
+        } else "Your SIP account is registered and ready for calls"
+        val notification = NotificationCompat.Builder(appContext, "sip_status")
+            .setSmallIcon(android.R.drawable.sym_action_call)
+            .setContentTitle(title)
+            .setContentText(detail)
+            .setCategory(if (activeCall) NotificationCompat.CATEGORY_CALL else NotificationCompat.CATEGORY_SERVICE)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setContentIntent(appPendingIntent())
+            .build()
+        manager.notify(1002, notification)
+    }
+
     private fun postIncomingNotification(caller: String) {
-        if (Build.VERSION.SDK_INT >= 33 && androidx.core.content.ContextCompat.checkSelfPermission(appContext, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
-        val manager = appContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        if (!canPostNotifications()) return
+        val manager = notificationManager()
         if (Build.VERSION.SDK_INT >= 26) manager.createNotificationChannel(NotificationChannel("incoming_calls", "Incoming calls", NotificationManager.IMPORTANCE_HIGH))
-        val intent = appContext.packageManager.getLaunchIntentForPackage(appContext.packageName)
-        val pending = intent?.let { PendingIntent.getActivity(appContext, 0, it, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE) }
         val notification = NotificationCompat.Builder(appContext, "incoming_calls")
             .setSmallIcon(android.R.drawable.sym_call_incoming).setContentTitle("TomOS SIP • Incoming call")
             .setContentText(caller).setCategory(NotificationCompat.CATEGORY_CALL)
-            .setPriority(NotificationCompat.PRIORITY_MAX).setAutoCancel(true).setContentIntent(pending).build()
+            .setPriority(NotificationCompat.PRIORITY_MAX).setAutoCancel(true).setContentIntent(appPendingIntent()).build()
         manager.notify(1001, notification)
     }
     fun accept() { core.currentCall?.accept(); incomingCaller = null }
@@ -246,12 +404,20 @@ class TomSipEngine(context: android.content.Context) {
         prefs.edit().putString("contacts", contacts.joinToString("\n")).apply()
     }
     fun hangup() { core.currentCall?.terminate(); callStatus = "Call ended" }
-    fun shutdown() { try { core.stop() } catch (_: Exception) { } }
+    fun shutdown() {
+        try {
+            notificationManager().cancel(1001)
+            notificationManager().cancel(1002)
+            core.stop()
+        } catch (_: Exception) { }
+    }
 }
 
 @Composable
 private fun TomSipScreen(engine: TomSipEngine) {
     val context = LocalContext.current
+    val updateScope = rememberCoroutineScope()
+    var updateDownloading by remember { mutableStateOf(false) }
     var updateMessage by remember { mutableStateOf("Checking GitHub releases…") }
     var availableUpdate by remember { mutableStateOf<GitHubUpdate?>(null) }
     var updateCheckKey by remember { mutableIntStateOf(0) }
@@ -280,6 +446,14 @@ private fun TomSipScreen(engine: TomSipEngine) {
     var selectedTab by remember { mutableStateOf("Dialler") }
     val tabs = listOf("Dialler", "Contacts", "History", "Settings")
     val tabSymbols = mapOf("Dialler" to "☎", "Contacts" to "♙", "History" to "◷", "Settings" to "⚙")
+    var elapsedCallSeconds by remember { mutableIntStateOf(0) }
+    LaunchedEffect(engine.callStartedAtMillis, engine.activeCall) {
+        while (engine.activeCall && engine.callStartedAtMillis > 0L) {
+            elapsedCallSeconds = ((SystemClock.elapsedRealtime() - engine.callStartedAtMillis) / 1000L).toInt().coerceAtLeast(0)
+            delay(1000)
+        }
+        if (!engine.activeCall) elapsedCallSeconds = 0
+    }
 
     MaterialTheme(colorScheme = darkColorScheme(
         primary = Pink, secondary = Cyan, background = Void, surface = Panel,
@@ -306,7 +480,9 @@ private fun TomSipScreen(engine: TomSipEngine) {
                 }
             }
         ) { innerPadding ->
-        Column(
+        if (engine.activeCall) {
+            ActiveCallScreen(engine = engine, elapsedSeconds = elapsedCallSeconds, modifier = Modifier.fillMaxSize().padding(innerPadding))
+        } else Column(
             Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0xFF111426), Void, Color(0xFF090A12))))
                 .padding(innerPadding).verticalScroll(rememberScrollState()).padding(22.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp)
@@ -344,11 +520,43 @@ private fun TomSipScreen(engine: TomSipEngine) {
                         if (availableUpdate != null) {
                             Button(
                                 onClick = {
-                                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(availableUpdate!!.releaseUrl)))
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+                                        !context.packageManager.canRequestPackageInstalls()
+                                    ) {
+                                        updateMessage = "Allow TomOS SIP to install apps from this source, then tap Install Update again."
+                                        context.startActivity(
+                                            Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}"))
+                                        )
+                                    } else if (!updateDownloading) {
+                                        updateScope.launch {
+                                            updateDownloading = true
+                                            updateMessage = "Downloading TomOS SIP update…"
+                                            try {
+                                                val update = availableUpdate ?: return@launch
+                                                val apk = downloadUpdateApk(context, update)
+                                                val apkUri = FileProvider.getUriForFile(
+                                                    context,
+                                                    "${context.packageName}.fileprovider",
+                                                    apk
+                                                )
+                                                val installIntent = Intent(Intent.ACTION_VIEW).apply {
+                                                    setDataAndType(apkUri, "application/vnd.android.package-archive")
+                                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                }
+                                                context.startActivity(installIntent)
+                                                updateMessage = "Downloaded. Confirm the update in Android's installer."
+                                            } catch (error: Exception) {
+                                                updateMessage = "Update failed: ${error.message ?: "download or installer error"}"
+                                            } finally {
+                                                updateDownloading = false
+                                            }
+                                        }
+                                    }
                                 },
                                 modifier = Modifier.weight(1f),
+                                enabled = !updateDownloading,
                                 colors = ButtonDefaults.buttonColors(containerColor = Pink)
-                            ) { Text("DOWNLOAD UPDATE") }
+                            ) { Text(if (updateDownloading) "DOWNLOADING…" else "INSTALL UPDATE") }
                         }
                     }
                 }
@@ -481,10 +689,98 @@ private fun TomSipScreen(engine: TomSipEngine) {
                     }
                 }
             }
+            Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(20.dp)) {
+                Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("AUDIO CODECS", color = Cyan, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+                    Text("Enable every codec your PBX supports. Linphone negotiates a compatible codec with the other endpoint for each call.", color = Muted, fontSize = 12.sp)
+                    if (engine.audioCodecs.isEmpty()) {
+                        Text("No audio codecs were reported by the Linphone SDK.", color = Pink, fontSize = 12.sp)
+                    }
+                    engine.audioCodecs.forEach { codec ->
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(codec.label, color = Color.White, fontWeight = FontWeight.SemiBold)
+                                Text(codec.details, color = Muted, fontSize = 11.sp)
+                            }
+                            Checkbox(
+                                checked = codec.enabled,
+                                onCheckedChange = { engine.setAudioCodecEnabled(codec.id, it) },
+                                colors = CheckboxDefaults.colors(checkedColor = Cyan, uncheckedColor = Muted)
+                            )
+                        }
+                    }
+                    Text(engine.codecStatus, color = Muted, fontSize = 11.sp)
+                }
+            }
             }
             Text("TOM OS  •  NEON PUNK EDITION", Modifier.fillMaxWidth(), color = Muted, fontSize = 10.sp, letterSpacing = 1.6.sp)
         }
         }
+    }
+}
+
+@Composable
+private fun ActiveCallScreen(engine: TomSipEngine, elapsedSeconds: Int, modifier: Modifier = Modifier) {
+    val isIncoming = engine.incomingCaller != null
+    Column(
+        modifier.background(Brush.verticalGradient(listOf(Void, Color(0xFF111326))))
+            .padding(horizontal = 24.dp, vertical = 28.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.SpaceBetween
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("TOMOS SIP", color = Cyan, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 3.sp)
+            Spacer(Modifier.height(24.dp))
+            Box(Modifier.size(112.dp).background(Panel, RoundedCornerShape(56.dp))
+                .border(2.dp, Cyan.copy(alpha = 0.65f), RoundedCornerShape(56.dp)), contentAlignment = Alignment.Center) {
+                Text("☎", color = Cyan, fontSize = 48.sp)
+            }
+            Spacer(Modifier.height(12.dp))
+            Text(engine.activeCallName, color = Color.White, fontSize = 27.sp, fontWeight = FontWeight.Bold)
+            Text(if (isIncoming) "INCOMING CALL" else engine.callStatus.uppercase(),
+                color = if (engine.callStatus == "On hold") Pink else Cyan,
+                fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+            if (engine.callStartedAtMillis > 0L) {
+                Text(String.format("%02d:%02d", elapsedSeconds / 60, elapsedSeconds % 60),
+                    color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.Light)
+            } else if (!isIncoming) Text("Connecting…", color = Muted, fontSize = 16.sp)
+        }
+        if (isIncoming) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+                Button(onClick = { engine.decline() }, Modifier.weight(1f).height(60.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Pink), shape = RoundedCornerShape(18.dp)) {
+                    Text("DECLINE", fontWeight = FontWeight.Bold)
+                }
+                Button(onClick = { engine.accept() }, Modifier.weight(1f).height(60.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Cyan, contentColor = Void), shape = RoundedCornerShape(18.dp)) {
+                    Text("ANSWER", fontWeight = FontWeight.Bold)
+                }
+            }
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(22.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                    CallControl("MUTE", engine.muted, "🎙") { engine.toggleMute() }
+                    CallControl("SPEAKER", engine.speaker, "🔊") { engine.toggleSpeaker() }
+                    CallControl(if (engine.held) "RESUME" else "HOLD", engine.held, "Ⅱ") { engine.toggleHold() }
+                }
+                Button(onClick = { engine.hangup() }, Modifier.fillMaxWidth(0.72f).height(64.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Pink), shape = RoundedCornerShape(22.dp)) {
+                    Text("END CALL", fontSize = 16.sp, fontWeight = FontWeight.Black, letterSpacing = 1.5.sp)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CallControl(label: String, selected: Boolean, symbol: String, onClick: () -> Unit) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        FilledTonalButton(onClick = onClick, modifier = Modifier.size(76.dp), shape = RoundedCornerShape(28.dp),
+            colors = ButtonDefaults.filledTonalButtonColors(
+                containerColor = if (selected) Cyan else Panel,
+                contentColor = if (selected) Void else Color.White
+            )) { Text(symbol, fontSize = 25.sp) }
+        Text(label, color = if (selected) Cyan else Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
     }
 }
 

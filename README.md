@@ -10,7 +10,8 @@ A TomOS-branded Android SIP softphone built with Kotlin, Jetpack Compose and the
 - Mute, speakerphone and hold/resume controls.
 - Locally stored contacts with one-tap calling and recent call history.
 - Advanced SIP account settings for authentication username, caller ID/display name, server port and registration expiry.
-- GitHub release update checker with version comparison and a link to download the latest published APK.
+- GitHub release update checker with version comparison, direct APK download, and Android package-installer handoff.
+- Audio codec controls for enabling/disabling every audio codec exposed by the bundled Linphone SDK; codec preferences are saved locally and used for new calls.
 
 ## Build
 Run from the repository root:
@@ -26,6 +27,11 @@ The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`. Main-br
 - For that one-time transition, back up anything important and uninstall the old TomOS SIP app before installing the first APK built with the persistent signing key. Uninstalling removes app-local contacts and call history.
 - After installing the first APK built with the persistent key, subsequent main-branch APK updates should retain the same signing identity and install as normal updates, provided the Android version code increases.
 - These are debug-signed test builds, not production-signed releases. A production distribution should use a protected release keystore and signing secrets.
+
+## Updates and audio codecs
+- The update checker downloads the APK asset from the matching GitHub Release, verifies the download is complete, and opens the Android package installer. Android may ask the user to allow TomOS SIP to install apps from this source.
+- Android still requires the downloaded APK to have the same signing certificate as the installed app and a higher version code. If the installed app was signed with an older, temporary debug key, uninstall it once and install a current main-branch build before testing in-app updates; uninstalling removes app-local contacts and call history.
+- The codec screen lists only audio codecs actually provided by the bundled Linphone SDK. Enable multiple codecs that are also supported by the PBX; Linphone negotiates a common codec for each call. At least one codec must remain enabled.
 
 ## Current limitations / validation
 - Advanced SIP settings are applied when registering the account. Confirm the configured port, authentication ID and registration expiry against your PBX.
