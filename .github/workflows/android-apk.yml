@@ -67,12 +67,17 @@ jobs:
         with:
           path: ~/.android/debug.keystore
           key: tomos-android-debug-keystore-v1-${{ github.ref == 'refs/heads/main' && 'main' || github.ref }}
+          restore-keys: |
+            tomos-android-debug-keystore-v1-main
 
       - name: Build debug APK
         run: gradle --no-daemon --stacktrace -PversionCode="${GITHUB_RUN_NUMBER}" assembleDebug
 
       - name: Verify APK exists
         run: test -s app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Check in-place update compatibility
+        run: python3 scripts/check_apk_update_compatibility.py
 
       - name: Create SHA-256 checksum
         run: sha256sum app/build/outputs/apk/debug/app-debug.apk > app/build/outputs/apk/debug/app-debug.apk.sha256
