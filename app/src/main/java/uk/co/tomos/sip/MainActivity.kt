@@ -979,6 +979,24 @@ private fun TomSipScreen(engine: TomSipEngine) {
     var premiumCode by remember { mutableStateOf("") }
     var premiumMessage by remember { mutableStateOf("Free edition. Activate a lifetime Premium code to unlock the Premium tools.") }
     var premiumBusy by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        if (BuildConfig.TOMOS_PREMIUM_PUBLIC_KEY.isNotBlank()) {
+            val storedLicence = withContext(Dispatchers.IO) {
+                SecurePremiumLicenceStore(context).load()
+            }
+            if (storedLicence != null) {
+                val isValid = runCatching {
+                    PremiumLicenceVerifier(BuildConfig.TOMOS_PREMIUM_PUBLIC_KEY)
+                        .verifyStored(org.json.JSONObject(storedLicence))
+                }.getOrDefault(false)
+                premiumMessage = if (isValid) {
+                    "Saved lifetime licence restored and signature verified. Premium feature access remains disabled in this build."
+                } else {
+                    "Saved licence failed verification. Premium feature access remains locked."
+                }
+            }
+        }
+    }
     var showExportPasswordDialog by remember { mutableStateOf(false) }
     var exportPassword by remember { mutableStateOf("") }
     var exportPasswordConfirm by remember { mutableStateOf("") }
