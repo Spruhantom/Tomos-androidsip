@@ -43,10 +43,14 @@ private val Muted = Color(0xFF9BA3B8)
 class MainActivity : ComponentActivity() {
     private var sip: TomSipEngine? = null
     private val permissionRequest = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    private val notificationPermissionRequest = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             permissionRequest.launch(Manifest.permission.RECORD_AUDIO)
+        }
+        if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            notificationPermissionRequest.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
         sip = TomSipEngine(applicationContext)
         setContent { TomSipScreen(sip!!) }
