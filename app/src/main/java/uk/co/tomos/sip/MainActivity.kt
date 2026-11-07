@@ -972,6 +972,11 @@ private fun TomSipScreen(engine: TomSipEngine) {
     var availableUpdate by remember { mutableStateOf<GitHubUpdate?>(null) }
     var updateCheckKey by remember { mutableIntStateOf(0) }
     var backupMessage by remember { mutableStateOf("Back up contacts and call history before reinstalling.") }
+    var backupRemindersEnabled by remember { mutableStateOf(context.getSharedPreferences("tomos_sip", Context.MODE_PRIVATE).getBoolean("backup_reminders_enabled", false)) }
+    LaunchedEffect(backupRemindersEnabled) {
+        context.getSharedPreferences("tomos_sip", Context.MODE_PRIVATE).edit().putBoolean("backup_reminders_enabled", backupRemindersEnabled).apply()
+        if (backupRemindersEnabled) BackupReminderScheduler.schedule(context) else BackupReminderScheduler.cancel(context)
+    }
     var pendingBackup by remember { mutableStateOf<TomosBackupDocument?>(null) }
     val exportBackupLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if (uri != null) {
@@ -1352,6 +1357,13 @@ private fun TomSipScreen(engine: TomSipEngine) {
                     Text("DATA BACKUP & RESTORE", color = Cyan, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
                     Text("Export contacts and call history to a JSON file, then import it after reinstalling TomOS SIP.", color = Muted, fontSize = 12.sp)
                     Text(backupMessage, color = Color.White, fontSize = 12.sp)
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text("WEEKLY BACKUP REMINDER", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            Text("Get a notification to export a fresh backup. Your file is never written automatically.", color = Muted, fontSize = 11.sp)
+                        }
+                        Switch(checked = backupRemindersEnabled, onCheckedChange = { backupRemindersEnabled = it })
+                    }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = { exportBackupLauncher.launch("tomos-sip-backup.json") }, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = Cyan, contentColor = Void)) { Text("EXPORT BACKUP") }
                         OutlinedButton(onClick = { importBackupLauncher.launch(arrayOf("application/json", "text/json", "application/octet-stream")) }, modifier = Modifier.weight(1f)) { Text("IMPORT BACKUP") }
