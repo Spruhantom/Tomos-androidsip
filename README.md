@@ -10,6 +10,7 @@ A TomOS-branded Android SIP softphone built with Kotlin, Jetpack Compose and the
 - Mute, speakerphone and hold/resume controls.
 - Locally stored contacts with one-tap calling and recent call history.
 - Advanced SIP account settings for authentication username, caller ID/display name, server port and registration expiry.
+- GitHub release update checker with version comparison and a link to download the latest published APK.
 
 ## Build
 Run from the repository root:
@@ -18,7 +19,7 @@ Run from the repository root:
 gradle --no-daemon --stacktrace assembleDebug
 ```
 
-The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`.
+The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`. Main-branch release APKs use the GitHub Actions run number as their Android version code so installed apps can identify newer releases.
 
 ## Current limitations / validation
 - Advanced SIP settings are applied when registering the account. Confirm the configured port, authentication ID and registration expiry against your PBX.
