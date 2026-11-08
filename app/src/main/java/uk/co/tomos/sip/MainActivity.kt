@@ -978,9 +978,11 @@ private fun TomSipScreen(engine: TomSipEngine) {
     var availableUpdate by remember { mutableStateOf<GitHubUpdate?>(null) }
     var updateCheckKey by remember { mutableIntStateOf(0) }
     var backupMessage by remember { mutableStateOf("Create a password-protected backup before reinstalling.") }
+    val premiumDeviceId = remember(context) { PremiumInstallationId.get(context) }
     var premiumCode by remember { mutableStateOf("") }
-    var premiumMessage by remember { mutableStateOf("Free edition. Activate a lifetime Premium code to unlock the Premium tools.") }
+    var premiumMessage by remember { mutableStateOf("Free edition. Import an offline lifetime licence or activate a code.") }
     var premiumBusy by remember { mutableStateOf(false) }
+    var premiumOfflineActive by remember { mutableStateOf(false) }
     val premiumQrScanner = rememberLauncherForActivityResult(ScanContract()) { result ->
         val scannedCode = result.contents?.let(::normalizeQrActivationCode)
         if (scannedCode != null) {
@@ -990,20 +992,72 @@ private fun TomSipScreen(engine: TomSipEngine) {
             premiumMessage = "This QR code is not a valid TomOS Premium activation code."
         }
     }
-    LaunchedEffect(Unit) {
-        if (BuildConfig.TOMOS_PREMIUM_PUBLIC_KEY.isNotBlank()) {
-            val storedLicence = withContext(Dispatchers.IO) {
-                SecurePremiumLicenceStore(context).load()
+    val offlineLicencePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            if (BuildConfig.TOMOS_PREMIUM_PUBLIC_KEY.isBlank()) {
+                premiumMessage = "Offline licence verification is not configured in this build."
+            } else {
+                premiumBusy = true
+                updateScope.launch {
+                    try {
+                        val imported = withContext(Dispatchers.IO) {
+                            val bytes = context.contentResolver.openInputStream(uri)?.use { input ->
+                                val output = java.io.ByteArrayOutputStream()
+                                val buffer = ByteArray(4096)
+                                var total = 0
+                                while (true) {
+                                    val count = input.read(buffer)
+                                    if (count < 0) break
+                                    total += count
+                                    require(total <= 64 * 1024) { "Licence file is larger than 64 KB." }
+                                    output.write(buffer, 0, count)
+                                }
+                                output.toByteArray()
+                            } ?: throw IllegalStateException("Android couldn't open the selected licence file.")
+                            val document = org.json.JSONObject(bytes.toString(Charsets.UTF_8))
+                            val verifier = PremiumLicenceVerifier(BuildConfig.TOMOS_PREMIUM_PUBLIC_KEY)
+                            val store = SecurePremiumLicenceStore(context)
+                            store.importOffline(document, premiumDeviceId, verifier)
+                            store.loadVerifiedOffline(premiumDeviceId, verifier)
+                                ?: throw SecurityException("The saved licence could not be re-verified.")
+                        }
+                        premiumOfflineActive = true
+                        premiumMessage = "Offline lifetime licence imported, device ID matched and signature verified. Premium feature unlocking remains disabled pending final integration tests."
+                    } catch (error: Exception) {
+                        premiumOfflineActive = false
+                        premiumMessage = "Offline licence import failed: ${error.message ?: "invalid licence file"}"
+                    } finally {
+                        premiumBusy = false
+                    }
+                }
             }
-            if (storedLicence != null) {
-                val isValid = runCatching {
-                    PremiumLicenceVerifier(BuildConfig.TOMOS_PREMIUM_PUBLIC_KEY)
-                        .verifyStored(org.json.JSONObject(storedLicence))
-                }.getOrDefault(false)
-                premiumMessage = if (isValid) {
-                    "Saved lifetime licence restored and signature verified. Premium feature access remains disabled in this build."
-                } else {
-                    "Saved licence failed verification. Premium feature access remains locked."
+        }
+    }
+    LaunchedEffect(premiumDeviceId) {
+        if (BuildConfig.TOMOS_PREMIUM_PUBLIC_KEY.isNotBlank()) {
+            val restored = withContext(Dispatchers.IO) {
+                runCatching {
+                    val store = SecurePremiumLicenceStore(context)
+                    val stored = store.load() ?: return@runCatching null
+                    val document = org.json.JSONObject(stored)
+                    val verifier = PremiumLicenceVerifier(BuildConfig.TOMOS_PREMIUM_PUBLIC_KEY)
+                    val payload = document.optJSONObject("payload")
+                    if (payload?.has("device_id") == true) {
+                        store.loadVerifiedOffline(premiumDeviceId, verifier)?.let { true }
+                    } else {
+                        verifier.verifyStored(document).let { valid -> if (valid) false else null }
+                    }
+                }.getOrNull()
+            }
+            when (restored) {
+                true -> {
+                    premiumOfflineActive = true
+                    premiumMessage = "Saved offline lifetime licence restored. Signature and installation ID verified. Premium feature unlocking remains disabled pending final integration tests."
+                }
+                false -> premiumMessage = "Saved lifetime licence signature verified. Premium feature unlocking remains disabled in this build."
+                null -> {
+                    premiumOfflineActive = false
+                    premiumMessage = "No valid saved Premium licence was found for this installation."
                 }
             }
         }
@@ -1268,6 +1322,26 @@ private fun TomSipScreen(engine: TomSipEngine) {
                         Text("One-time lifetime licence", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                         Text("Premium includes multiple SIP accounts, advanced codec controls and encrypted backups. Core SIP calling remains free.", color = Muted, fontSize = 12.sp)
                         Text(premiumMessage, color = Color.White, fontSize = 12.sp)
+                        Text("OFFLINE DEVICE ACTIVATION", color = Cyan, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                        Text("Give this installation ID to your administrator. They will generate a signed licence file that works without an activation server.", color = Muted, fontSize = 11.sp)
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(premiumDeviceId, color = Color.White, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                            OutlinedButton(onClick = {
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("TomOS SIP installation ID", premiumDeviceId))
+                                premiumMessage = "Installation ID copied. Send it to your administrator to request a licence."
+                            }) { Text("COPY ID") }
+                        }
+                        OutlinedButton(
+                            onClick = { offlineLicencePicker.launch(arrayOf("application/json", "text/json", "*/*")) },
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = !premiumBusy
+                        ) {
+                            Text(if (premiumBusy) "VERIFYING LICENCE…" else "IMPORT OFFLINE LICENCE FILE")
+                        }
+                        Text("The imported file is checked against this installation ID and its Ed25519 signature, then stored encrypted with Android Keystore.", color = Muted, fontSize = 11.sp)
+                        Divider(color = Color(0xFF34394D))
+                        Text("ONLINE ACTIVATION (OPTIONAL)", color = Cyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         OutlinedButton(
                             onClick = {
                                 premiumQrScanner.launch(
@@ -1319,7 +1393,7 @@ private fun TomSipScreen(engine: TomSipEngine) {
                         ) {
                             Text(if (premiumBusy) "VERIFYING…" else "ACTIVATE PREMIUM")
                         }
-                        Text("Activation requires an internet connection. Your signed licence is verified on this device and stored encrypted with the Android Keystore.", color = Muted, fontSize = 11.sp)
+                        Text("Online activation requires an internet connection. Offline file import does not. Reinstalling or clearing app data may create a new installation ID and require a reissued licence.", color = Muted, fontSize = 11.sp)
                     }
                 }
             }
