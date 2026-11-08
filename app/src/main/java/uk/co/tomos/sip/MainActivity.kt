@@ -657,7 +657,7 @@ class TomSipEngine(context: android.content.Context) {
                         it.transport == transportType &&
                         it.port == (sipPort.toIntOrNull() ?: 0)
                 }
-            require(existing != null || premiumLicenceActive || sipAccounts.none { it.enabled }) {
+            require(existing != null || premiumLicenceActive || sipAccounts.isEmpty()) {
                 "Multiple SIP accounts are a Premium feature. Scan your offline licence QR to add another account."
             }
             val profile = SipAccountProfile(
