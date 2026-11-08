@@ -886,16 +886,19 @@ class TomSipEngine(context: android.content.Context) {
                 }
             )
         }
-        if (!registered && !activeCall) {
-            manager.cancel(1002)
-            return
+        // The foreground service owns notification ID 1002. Update that same
+        // notification instead of posting a second status icon or cancelling the
+        // foreground notification when registration is temporarily unavailable.
+        val title = when {
+            activeCall -> "TomOS SIP • $callStatus"
+            registered -> "TomOS SIP • Registered"
+            else -> "TomOS SIP • Not registered"
         }
-        val title = if (activeCall) "TomOS SIP • $callStatus" else "TomOS SIP • Registered"
         val detail = if (activeCall) {
             if (callStartedAtMillis > 0L) activeCallName else "Call with $activeCallName"
         } else "Your SIP account is registered and ready for calls"
         val notification = NotificationCompat.Builder(appContext, "sip_status")
-            .setSmallIcon(android.R.drawable.sym_action_call)
+            .setSmallIcon(R.drawable.ic_notification_tomos)
             .setContentTitle(title)
             .setContentText(detail)
             .setCategory(if (activeCall) NotificationCompat.CATEGORY_CALL else NotificationCompat.CATEGORY_SERVICE)
@@ -940,7 +943,7 @@ class TomSipEngine(context: android.content.Context) {
             )
         }
         val notificationBuilder = NotificationCompat.Builder(appContext, "incoming_calls")
-            .setSmallIcon(android.R.drawable.sym_call_incoming)
+            .setSmallIcon(R.drawable.ic_notification_tomos)
             .setContentTitle("TomOS SIP • Incoming call")
             .setContentText(caller)
             .setCategory(NotificationCompat.CATEGORY_CALL)
