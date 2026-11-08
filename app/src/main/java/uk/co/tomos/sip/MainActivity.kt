@@ -1584,9 +1584,12 @@ private fun TomSipScreen(engine: TomSipEngine) {
                                     premiumBusy = true
                                     updateScope.launch {
                                         val client = PremiumActivationClient(
-                                            context,
-                                            BuildConfig.TOMOS_PREMIUM_API_URL,
-                                            PremiumLicenceVerifier(BuildConfig.TOMOS_PREMIUM_PUBLIC_KEY)
+                                            endpoint = BuildConfig.TOMOS_PREMIUM_API_URL,
+                                            verifier = PremiumLicenceVerifier(BuildConfig.TOMOS_PREMIUM_PUBLIC_KEY),
+                                            installationId = { PremiumInstallationId.get(context) },
+                                            saveLicence = { licence ->
+                                                SecurePremiumLicenceStore(context).save(licence.toString())
+                                            }
                                         )
                                         val result = client.redeem(premiumCode)
                                         premiumMessage = result.fold(
