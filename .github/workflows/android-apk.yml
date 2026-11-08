@@ -42,7 +42,8 @@ jobs:
 
   keystore-instrumentation:
     name: Test Android Keystore on emulator
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -53,6 +54,11 @@ jobs:
           java-version: "17"
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
+      - name: Enable KVM for Android emulator
+        run: |
+          echo 'KERNEL==\"kvm\", GROUP=\"kvm\", MODE=\"0666\", OPTIONS+=\"static_node=kvm\"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
       - name: Run Android Keystore instrumentation tests
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -60,6 +66,8 @@ jobs:
           target: google_apis
           arch: x86_64
           profile: pixel_2
+          emulator-boot-timeout: 300
+          disable-linux-hw-accel: false
           script: gradle --no-daemon --stacktrace connectedDebugAndroidTest
       - name: Upload instrumentation-test reports
         if: always()
