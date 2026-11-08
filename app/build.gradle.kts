@@ -1,3 +1,5 @@
+import java.util.Base64
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -59,7 +61,7 @@ tasks.matching { it.name == "preReleaseBuild" }.configureEach {
             .replace("-----BEGIN PUBLIC KEY-----", "")
             .replace("-----END PUBLIC KEY-----", "")
             .filterNot { it.isWhitespace() }
-        val decoded = runCatching { java.util.Base64.getDecoder().decode(pemBody) }.getOrNull()
+        val decoded = runCatching { Base64.getDecoder().decode(pemBody) }.getOrNull()
         val ed25519SubjectPublicKeyInfoPrefix = byteArrayOf(
             0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65,
             0x70, 0x03, 0x21, 0x00
@@ -71,7 +73,7 @@ tasks.matching { it.name == "preReleaseBuild" }.configureEach {
                 .contentEquals(ed25519SubjectPublicKeyInfoPrefix)) {
             "TOMOS_PREMIUM_PUBLIC_KEY must be a valid Ed25519 SubjectPublicKeyInfo PEM public key."
         }
-        require(java.util.Base64.getEncoder().encodeToString(decoded) !=
+        require(Base64.getEncoder().encodeToString(decoded) !=
             "MCowBQYDK2VwAyEAebVWLo/mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ=") {
             "The shared cross-language CI fixture key is test-only and cannot be used for release builds."
         }
