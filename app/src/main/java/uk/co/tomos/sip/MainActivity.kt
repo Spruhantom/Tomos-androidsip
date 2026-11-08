@@ -259,7 +259,7 @@ class TomSipEngine(context: android.content.Context) {
     var premiumLicenceActive by mutableStateOf(false)
         private set
 
-    fun updatePremiumLicenceStatus(licenceVerified: Boolean) {
+    fun updatePremiumLicenceStatus(licenceVerified: Boolean): Boolean {
         // The test-track switch is an additional gate, never a substitute for
         // successful offline signature and installation-ID verification.
         premiumLicenceActive = licenceVerified && BuildConfig.PREMIUM_TESTING_ENABLED
@@ -270,6 +270,7 @@ class TomSipEngine(context: android.content.Context) {
                 "Advanced codec controls require an active Premium licence."
             }
         }
+        return premiumLicenceActive
     }
     private val prefs = context.getSharedPreferences("tomos_sip", 0)
     private val profileStore = SipAccountProfileStore(context)
@@ -1109,9 +1110,12 @@ private fun TomSipScreen(engine: TomSipEngine) {
                             store.loadVerifiedOffline(premiumDeviceId, verifier)
                                 ?: throw SecurityException("The saved licence could not be re-verified.")
                         }
-                        premiumOfflineActive = true
-                        engine.updatePremiumLicenceStatus(true)
-                        premiumMessage = "Premium activated. Your offline licence is verified and saved securely on this device."
+                        premiumOfflineActive = engine.updatePremiumLicenceStatus(true)
+                        premiumMessage = if (premiumOfflineActive) {
+                            "Premium activated. Your offline licence is verified and saved securely on this device."
+                        } else {
+                            "Licence verified and saved, but Premium testing is disabled in this build."
+                        }
                     } catch (error: Exception) {
                         premiumOfflineActive = false
                         premiumMessage = "Offline licence import failed: ${error.message ?: "invalid licence file"}"
@@ -1141,9 +1145,12 @@ private fun TomSipScreen(engine: TomSipEngine) {
                             store.loadVerifiedOffline(premiumDeviceId, verifier)
                                 ?: throw SecurityException("The saved licence could not be re-verified.")
                         }
-                        premiumOfflineActive = true
-                        engine.updatePremiumLicenceStatus(true)
-                        premiumMessage = "Premium activated from QR. Your licence is verified and saved securely on this device."
+                        premiumOfflineActive = engine.updatePremiumLicenceStatus(true)
+                        premiumMessage = if (premiumOfflineActive) {
+                            "Premium activated from QR. Your licence is verified and saved securely on this device."
+                        } else {
+                            "QR licence verified and saved, but Premium testing is disabled in this build."
+                        }
                     } catch (error: Exception) {
                         premiumOfflineActive = false
                         premiumMessage = "Offline QR import failed: ${error.message ?: "invalid licence"}"
@@ -1170,9 +1177,12 @@ private fun TomSipScreen(engine: TomSipEngine) {
             }
             when (restored) {
                 true -> {
-                    premiumOfflineActive = true
-                    engine.updatePremiumLicenceStatus(true)
-                    premiumMessage = "Premium active. Saved offline licence signature and installation ID verified."
+                    premiumOfflineActive = engine.updatePremiumLicenceStatus(true)
+                    premiumMessage = if (premiumOfflineActive) {
+                        "Premium active. Saved offline licence signature and installation ID verified."
+                    } else {
+                        "Saved offline licence verified, but Premium testing is disabled in this build."
+                    }
                 }
                 false -> {
                     premiumOfflineActive = false
