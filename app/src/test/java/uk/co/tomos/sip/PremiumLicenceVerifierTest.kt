@@ -22,6 +22,22 @@ class PremiumLicenceVerifierTest {
         assertNull(normalizeQrActivationCode("TOMOS-PREM-0000-0000-0000-0000"))
     }
 
+    @Test fun offlineLicenceQrParserAcceptsCompleteDeviceBoundDocument() {
+        val payload = """{"device_id":"123e4567-e89b-12d3-a456-426614174000"}"""
+        val qr = JSONObject()
+            .put("signature_algorithm", "Ed25519")
+            .put("signed_payload", "c2lnbmVk")
+            .put("signature", "c2lnbmF0dXJl")
+            .put("payload", JSONObject(payload))
+        assertEquals("123e4567-e89b-12d3-a456-426614174000", parseOfflineLicenceQr(qr.toString())?.getJSONObject("payload")?.getString("device_id"))
+    }
+
+    @Test fun offlineLicenceQrParserRejectsCodesMalformedJsonAndOversizedPayloads() {
+        assertNull(parseOfflineLicenceQr("TOMOS-PREM-ABCD-EFGH-IJKL-MNOP"))
+        assertNull(parseOfflineLicenceQr("{not-json}"))
+        assertNull(parseOfflineLicenceQr("x".repeat(64 * 1024 + 1)))
+        assertNull(parseOfflineLicenceQr("""{"signature_algorithm":"Ed25519","signed_payload":"abc","signature":"def","payload":{}}"""))
+    }
     @Test fun missingPublicKeyRejectsLicence() {
         assertFalse(PremiumLicenceVerifier("").verify(JSONObject(), "TOMOS-PREM-AAAA-BBBB-CCCC-DDDD"))
     }
