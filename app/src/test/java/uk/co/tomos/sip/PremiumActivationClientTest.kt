@@ -48,30 +48,15 @@ class PremiumActivationClientTest {
     }
 
     private fun fixture(): Fixture {
-        val code = "TOMOS-PREM-ABCD-EFGH-IJKL-MNOP"
-        val digest = MessageDigest.getInstance("SHA-256")
-            .digest(code.toByteArray(Charsets.US_ASCII))
-            .joinToString("") { "%02x".format(it) }
-        val canonical = """{"activation_code_sha256":"$digest","customer_reference":"android-client-test","features":["multiple_sip_accounts","advanced_codec_controls","encrypted_backup"],"issued_at":"2026-11-08T00:00:00Z","licence_id":"00000000-0000-0000-0000-000000000001","licence_type":"lifetime","product":"tomos-sip","schema":1}"""
-        val payloadBytes = canonical.toByteArray(Charsets.UTF_8)
-        val privateKey = Ed25519PrivateKeyParameters(SecureRandom())
-        val signer = Ed25519Signer().apply {
-            init(true, privateKey)
-            update(payloadBytes, 0, payloadBytes.size)
+        val input = requireNotNull(javaClass.getResourceAsStream("/premium_activation_fixture.json")) {
+            "Shared generator/Android activation fixture is missing."
         }
-        val spkiPrefix = byteArrayOf(
-            0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65,
-            0x70, 0x03, 0x21, 0x00
+        val json = JSONObject(input.bufferedReader().use { it.readText() })
+        return Fixture(
+            code = json.getString("activation_code"),
+            document = json.getJSONObject("licence"),
+            publicKeyPem = json.getString("public_key_pem")
         )
-        val publicPem = "-----BEGIN PUBLIC KEY-----\n" +
-            Base64.getEncoder().encodeToString(spkiPrefix + privateKey.generatePublicKey().encoded) +
-            "\n-----END PUBLIC KEY-----"
-        val document = JSONObject()
-            .put("payload", JSONObject(canonical))
-            .put("signature_algorithm", "Ed25519")
-            .put("signed_payload", Base64.getEncoder().encodeToString(payloadBytes))
-            .put("signature", Base64.getEncoder().encodeToString(signer.generateSignature()))
-        return Fixture(code, document, publicPem)
     }
 
     @Test fun successfulRedemptionSendsCodeAndInstallationIdThenPersistsVerifiedLicence() {
