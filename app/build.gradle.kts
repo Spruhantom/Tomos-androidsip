@@ -4,6 +4,20 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+val premiumApiUrl = providers.gradleProperty("tomosPremiumApiUrl")
+    .orElse(providers.environmentVariable("TOMOS_PREMIUM_API_URL"))
+    .orElse("")
+    .get()
+val premiumPublicKey = providers.gradleProperty("tomosPremiumPublicKey")
+    .orElse(providers.environmentVariable("TOMOS_PREMIUM_PUBLIC_KEY"))
+    .orElse("")
+    .get()
+val escapedPremiumPublicKey = premiumPublicKey
+    .replace("\\", "\\\\")
+    .replace("\"", "\\\"")
+    .replace("\r", "")
+    .replace("\n", "\\n")
+
 android {
     namespace = "uk.co.tomos.sip"
     compileSdk = 35
@@ -16,6 +30,7 @@ android {
         targetSdk = 35
         versionCode = providers.gradleProperty("versionCode").orElse("1").get().toInt()
         versionName = "0.1.0"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildTypes {
@@ -29,6 +44,41 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true; buildConfig = true }
+}
+
+
+ // Release APKs must never be published with an empty, malformed, or the shared
+ // cross-language fixture key as their Premium verification key. Debug builds
+ // intentionally remain buildable without production signing material.
+tasks.matching { it.name == "preReleaseBuild" }.configureEach {
+    doFirst {
+        require(premiumPublicKey.isNotBlank()) {
+            "Release builds require -PtomosPremiumPublicKey or TOMOS_PREMIUM_PUBLIC_KEY."
+        }
+        val pemBody = premiumPublicKey
+            .replace("-----BEGIN PUBLIC KEY-----", "")
+            .replace("-----END PUBLIC KEY-----", "")
+            .filterNot { it.isWhitespace() }
+        val decoded = runCatching { java.util.Base64.getDecoder().decode(pemBody) }.getOrNull()
+        val ed25519SubjectPublicKeyInfoPrefix = byteArrayOf(
+            0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65,
+            0x70, 0x03, 0x21, 0x00
+        )
+        require(premiumPublicKey.trim().startsWith("-----BEGIN PUBLIC KEY-----") &&
+            premiumPublicKey.trim().endsWith("-----END PUBLIC KEY-----") &&
+            decoded != null && decoded.size == 44 &&
+            decoded.copyOfRange(0, ed25519SubjectPublicKeyInfoPrefix.size)
+                .contentEquals(ed25519SubjectPublicKeyInfoPrefix)) {
+            "TOMOS_PREMIUM_PUBLIC_KEY must be a valid Ed25519 SubjectPublicKeyInfo PEM public key."
+        }
+        require(java.util.Base64.getEncoder().encodeToString(decoded) !=
+            "MCowBQYDK2VwAyEAebVWLo/mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ=") {
+            "The shared cross-language CI fixture key is test-only and cannot be used for release builds."
+        }
+        require(!premiumPublicKey.contains("PRIVATE KEY")) {
+            "Only the Ed25519 public key may be embedded in the Android application."
+        }
+    }
 }
 
 dependencies {
