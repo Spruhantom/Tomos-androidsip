@@ -66,7 +66,7 @@ jobs:
           grep -F "Release builds require" /tmp/release-no-key.log
 
           mkdir -p /tmp/tomos-premium-key-check
-          printf '%s\\n' \
+          printf '%s\n' \
             '-----BEGIN PUBLIC KEY-----' \
             'MCowBQYDK2VwAyEAebVWLo/mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ=' \
             '-----END PUBLIC KEY-----' > /tmp/tomos-premium-key-check/fixture.pem
