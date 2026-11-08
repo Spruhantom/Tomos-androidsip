@@ -21,6 +21,12 @@ import javax.crypto.spec.GCMParameterSpec
 private const val PREMIUM_PRODUCT = "tomos-sip"
 private val PREMIUM_FEATURES = listOf("multiple_sip_accounts", "advanced_codec_controls", "encrypted_backup")
 
+/** Strictly normalise an activation-code string for compatibility tests only. */
+internal fun normalizeQrActivationCode(value: String): String? {
+    val normalized = value.filterNot(Char::isWhitespace).uppercase(Locale.ROOT)
+    return normalized.takeIf { it.matches(Regex("TOMOS-PREM-(?:[A-Z2-7]{4}-){3}[A-Z2-7]{4}")) }
+}
+
 /** Parse a bounded QR payload containing a complete offline licence document. */
 internal fun parseOfflineLicenceQr(value: String): JSONObject? {
     if (value.length !in 2..(64 * 1024)) return null
