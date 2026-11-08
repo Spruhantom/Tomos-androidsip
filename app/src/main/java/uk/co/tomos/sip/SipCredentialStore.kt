@@ -30,12 +30,10 @@ class SipCredentialStore(context: Context) {
             cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey(aliasFor(accountId)))
             val encrypted = cipher.doFinal(password.toByteArray(StandardCharsets.UTF_8))
             val payload = ByteBuffer.allocate(IV_SIZE + encrypted.size)
-                .put(cipher.iv)
-                .put(encrypted)
-                .array()
-            preferences.edit()
+                .put(cipher.iv).put(encrypted).array()
+            check(preferences.edit()
                 .putString(storageKey(accountId), Base64.encodeToString(payload, Base64.NO_WRAP))
-                .apply()
+                .commit()) { "Unable to persist the encrypted SIP credential." }
         } catch (error: Exception) {
             throw IllegalStateException("Unable to protect SIP credentials with Android Keystore.", error)
         }
@@ -56,16 +54,49 @@ class SipCredentialStore(context: Context) {
             return String(cipher.doFinal(ciphertext), StandardCharsets.UTF_8)
         } catch (error: Exception) {
             throw IllegalStateException(
-                "Unable to decrypt SIP credentials. The account may need its password entered again.",
-                error
+                "Unable to decrypt SIP credentials. The account may need its password entered again.", error
             )
+        }
+    }
+
+    /**
+     * Export plaintext only into the in-memory payload that is immediately
+     * encrypted with the user's backup password. Never persist or log this map.
+     */
+    @Synchronized
+    fun exportForEncryptedBackup(accountIds: Collection<String>): Map<String, String> {
+        require(accountIds.all { it.isNotBlank() }) { "Account ID cannot be blank." }
+        return accountIds.distinct().mapNotNull { id -> read(id)?.let { id to it } }.toMap()
+    }
+
+    /**
+     * Re-encrypt credentials using this installation's Keystore keys. This is
+     * intentionally called only after the outer encrypted backup authenticated.
+     * Existing values are snapshotted and restored if any write fails.
+     */
+    @Synchronized
+    fun restoreFromEncryptedBackup(credentials: Map<String, String>) {
+        require(credentials.keys.all { it.isNotBlank() }) { "Backup contains an invalid account ID." }
+        require(credentials.values.all { it.isNotEmpty() }) { "Backup contains an empty SIP password." }
+        val previous = credentials.keys.associateWith { read(it) }
+        try {
+            credentials.forEach { (accountId, password) -> save(accountId, password) }
+        } catch (failure: Exception) {
+            previous.forEach { (accountId, password) ->
+                runCatching {
+                    if (password == null) delete(accountId) else save(accountId, password)
+                }
+            }
+            throw IllegalStateException("Unable to restore SIP credentials. Existing credentials were rolled back.", failure)
         }
     }
 
     @Synchronized
     fun delete(accountId: String) {
         require(accountId.isNotBlank()) { "Account ID cannot be blank." }
-        preferences.edit().remove(storageKey(accountId)).apply()
+        check(preferences.edit().remove(storageKey(accountId)).commit()) {
+            "Unable to remove the stored SIP credential."
+        }
         try {
             val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
             keyStore.deleteEntry(aliasFor(accountId))
@@ -78,18 +109,12 @@ class SipCredentialStore(context: Context) {
         val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
         val existing = keyStore.getKey(alias, null) as? SecretKey
         if (existing != null) return existing
-
         val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE)
         generator.init(
-            KeyGenParameterSpec.Builder(
-                alias,
-                KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
-            )
-                .setKeySize(256)
-                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+            KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
+                .setKeySize(256).setBlockModes(KeyProperties.BLOCK_MODE_GCM)
                 .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                .setRandomizedEncryptionRequired(true)
-                .build()
+                .setRandomizedEncryptionRequired(true).build()
         )
         return generator.generateKey()
     }

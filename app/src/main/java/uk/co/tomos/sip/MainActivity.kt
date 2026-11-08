@@ -1166,9 +1166,12 @@ private fun TomSipScreen(engine: TomSipEngine) {
                     val verifier = PremiumLicenceVerifier(BuildConfig.TOMOS_PREMIUM_PUBLIC_KEY)
                     val payload = document.optJSONObject("payload")
                     if (payload?.has("device_id") == true) {
+                        // Offline licences carry a signed installation UUID and must match it.
                         store.loadVerifiedOffline(premiumDeviceId, verifier)?.let { true }
                     } else {
-                        verifier.verifyStored(document).let { valid -> if (valid) false else null }
+                        // Online codes are single-device-bound by the redemption service.
+                        // Their signed licence has no device_id, so verify its signature on restart.
+                        verifier.verifyStored(document).let { valid -> if (valid) true else null }
                     }
                 }.getOrNull()
             }
