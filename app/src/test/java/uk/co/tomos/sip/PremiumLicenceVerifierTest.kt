@@ -76,9 +76,9 @@ class PremiumLicenceVerifierTest {
         }
         val signature = signer.generateSignature()
         val spkiPrefix = byteArrayOf(0x30,0x2a,0x30,0x05,0x06,0x03,0x2b,0x65,0x70,0x03,0x21,0x00)
-        val publicPem = "-----BEGIN PUBLIC KEY-----\\n" +
+        val publicPem = "-----BEGIN PUBLIC KEY-----\n" +
             Base64.getEncoder().encodeToString(spkiPrefix + privateKey.generatePublicKey().encoded) +
-            "\\n-----END PUBLIC KEY-----"
+            "\n-----END PUBLIC KEY-----"
         val document = JSONObject()
             .put("signature_algorithm", "Ed25519")
             .put("signed_payload", Base64.getEncoder().encodeToString(payloadBytes))
