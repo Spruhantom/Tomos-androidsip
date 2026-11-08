@@ -40,6 +40,38 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+  keystore-instrumentation:
+    name: Test Android Keystore on emulator
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+      - name: Run Android Keystore instrumentation tests
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          script: gradle --no-daemon --stacktrace connectedDebugAndroidTest
+      - name: Upload instrumentation-test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: TomOS-SIP-Android-Instrumentation-Reports
+          path: |
+            app/build/reports/androidTests/connected/
+            app/build/outputs/androidTest-results/connected/
+          if-no-files-found: warn
+          retention-days: 14
+
   build:
     name: Build Android APK
     runs-on: ubuntu-latest
