@@ -49,6 +49,14 @@ private fun jsonEquivalent(left: Any?, right: Any?): Boolean {
 /** Verifies the exact canonical payload bytes signed by the offline generator. */
 class PremiumLicenceVerifier(private val publicKeyPem: String) {
     fun verify(document: JSONObject, activationCode: String): Boolean = verifyDocument(document, activationCode)
+
+    /** Verifies a serverless licence and enforces its signed installation UUID binding. */
+    fun verifyOffline(document: JSONObject, deviceId: String): Boolean = runCatching {
+        val normalizedDeviceId = UUID.fromString(deviceId).toString()
+        verifyDocument(document, null) &&
+            UUID.fromString(document.getJSONObject("payload").getString("device_id")).toString() == normalizedDeviceId
+    }.getOrDefault(false)
+
     /** Re-verifies a locally stored licence after restart; the original code is not stored. */
     fun verifyStored(document: JSONObject): Boolean = verifyDocument(document, null)
 
