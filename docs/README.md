@@ -4,6 +4,7 @@ Welcome to the documentation for the TomOS SIP Android softphone.
 
 ## Guides
 
+- [App updates and data retention](APP_UPDATES_AND_DATA.md) — what survives an APK update, how sensitive data is stored, and release compatibility rules.
 - [User guide](USER_GUIDE.md) — install, configure and use the app.
 - [SIP configuration](SIP_CONFIGURATION.md) — account fields, transports and codec guidance.
 - [Testing checklist](TESTING_CHECKLIST.md) — manual validation steps for Android devices and PBX environments.
