@@ -245,7 +245,7 @@ class TomSipEngine(context: android.content.Context) {
     var premiumLicenceActive by mutableStateOf(false)
         private set
 
-    fun setPremiumLicenceActive(active: Boolean) {
+    fun updatePremiumLicenceStatus(active: Boolean) {
         premiumLicenceActive = active
         if (!active) codecStatus = "Advanced codec controls require an active Premium licence."
     }
@@ -1040,7 +1040,7 @@ private fun TomSipScreen(engine: TomSipEngine) {
                                 ?: throw SecurityException("The saved licence could not be re-verified.")
                         }
                         premiumOfflineActive = true
-                        engine.setPremiumLicenceActive(true)
+                        engine.updatePremiumLicenceStatus(true)
                         premiumMessage = "Premium activated. Your offline licence is verified and saved securely on this device."
                     } catch (error: Exception) {
                         premiumOfflineActive = false
