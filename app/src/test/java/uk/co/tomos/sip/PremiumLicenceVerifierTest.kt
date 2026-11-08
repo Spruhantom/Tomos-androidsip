@@ -64,4 +64,30 @@ class PremiumLicenceVerifierTest {
         assertFalse(verifier.verify(document, code + "é"))
         assertFalse(verifier.verify(document, code.replace("-", "")))
     }
+
+    @Test fun offlineLicenceMustMatchThisInstallation() {
+        val deviceId = "123e4567-e89b-12d3-a456-426614174000"
+        val canonical = """{"activation_code_sha256":"0000000000000000000000000000000000000000000000000000000000000000","customer_reference":"offline-test","device_id":"$deviceId","features":["multiple_sip_accounts","advanced_codec_controls","encrypted_backup"],"issued_at":"2026-11-08T00:00:00Z","licence_id":"00000000-0000-0000-0000-000000000002","licence_type":"lifetime","product":"tomos-sip","schema":1}"""
+        val payloadBytes = canonical.toByteArray(Charsets.UTF_8)
+        val privateKey = Ed25519PrivateKeyParameters(java.security.SecureRandom())
+        val signer = Ed25519Signer().apply {
+            init(true, privateKey)
+            update(payloadBytes, 0, payloadBytes.size)
+        }
+        val signature = signer.generateSignature()
+        val spkiPrefix = byteArrayOf(0x30,0x2a,0x30,0x05,0x06,0x03,0x2b,0x65,0x70,0x03,0x21,0x00)
+        val publicPem = "-----BEGIN PUBLIC KEY-----\\n" +
+            Base64.getEncoder().encodeToString(spkiPrefix + privateKey.generatePublicKey().encoded) +
+            "\\n-----END PUBLIC KEY-----"
+        val document = JSONObject()
+            .put("signature_algorithm", "Ed25519")
+            .put("signed_payload", Base64.getEncoder().encodeToString(payloadBytes))
+            .put("signature", Base64.getEncoder().encodeToString(signature))
+            .put("payload", JSONObject(canonical))
+        val verifier = PremiumLicenceVerifier(publicPem)
+        assertTrue(verifier.verifyOffline(document, deviceId))
+        assertFalse(verifier.verifyOffline(document, "123e4567-e89b-12d3-a456-426614174001"))
+        assertFalse(verifier.verifyOffline(document, "not-a-device-id"))
+    }
+
 }
