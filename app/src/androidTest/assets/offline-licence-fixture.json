@@ -1,0 +1,20 @@
+{
+  "payload": {
+    "activation_code_sha256": "a56043ff46235be093d85c30f7413b9c11b428b467f10b705ba1302768cbe80a",
+    "customer_reference": "cross-language-test-vector",
+    "device_id": "123e4567-e89b-12d3-a456-426614174001",
+    "features": [
+      "multiple_sip_accounts",
+      "advanced_codec_controls",
+      "encrypted_backup"
+    ],
+    "issued_at": "2026-11-08T00:00:00Z",
+    "licence_id": "123e4567-e89b-12d3-a456-426614174000",
+    "licence_type": "lifetime",
+    "product": "tomos-sip",
+    "schema": 1
+  },
+  "signature": "nVIsSTnRUc3oVa7xy/nPTdwhBnXcSHrxRTTnly6kDmJS2w/th2WmXJtmmampKc4RYaZLbQW9jstdziTh3XqZBQ==",
+  "signature_algorithm": "Ed25519",
+  "signed_payload": "eyJhY3RpdmF0aW9uX2NvZGVfc2hhMjU2IjoiYTU2MDQzZmY0NjIzNWJlMDkzZDg1YzMwZjc0MTNiOWMxMWI0MjhiNDY3ZjEwYjcwNWJhMTMwMjc2OGNiZTgwYSIsImN1c3RvbWVyX3JlZmVyZW5jZSI6ImNyb3NzLWxhbmd1YWdlLXRlc3QtdmVjdG9yIiwiZGV2aWNlX2lkIjoiMTIzZTQ1NjctZTg5Yi0xMmQzLWE0NTYtNDI2NjE0MTc0MDAxIiwiZmVhdHVyZXMiOlsibXVsdGlwbGVfc2lwX2FjY291bnRzIiwiYWR2YW5jZWRfY29kZWNfY29udHJvbHMiLCJlbmNyeXB0ZWRfYmFja3VwIl0sImlzc3VlZF9hdCI6IjIwMjYtMTEtMDhUMDA6MDA6MDBaIiwibGljZW5jZV9pZCI6IjEyM2U0NTY3LWU4OWItMTJkMy1hNDU2LTQyNjYxNDE3NDAwMCIsImxpY2VuY2VfdHlwZSI6ImxpZmV0aW1lIiwicHJvZHVjdCI6InRvbW9zLXNpcCIsInNjaGVtYSI6MX0="
+}
