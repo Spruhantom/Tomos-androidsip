@@ -25,6 +25,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import com.journeyapps.barcodescanner.ScanContract
+import com.journeyapps.barcodescanner.ScanOptions
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -979,6 +981,15 @@ private fun TomSipScreen(engine: TomSipEngine) {
     var premiumCode by remember { mutableStateOf("") }
     var premiumMessage by remember { mutableStateOf("Free edition. Activate a lifetime Premium code to unlock the Premium tools.") }
     var premiumBusy by remember { mutableStateOf(false) }
+    val premiumQrScanner = rememberLauncherForActivityResult(ScanContract()) { result ->
+        val scannedCode = result.contents?.let(::normalizeQrActivationCode)
+        if (scannedCode != null) {
+            premiumCode = scannedCode
+            premiumMessage = "QR code recognised. Check the code and tap Activate Premium to redeem it."
+        } else if (result.contents != null) {
+            premiumMessage = "This QR code is not a valid TomOS Premium activation code."
+        }
+    }
     LaunchedEffect(Unit) {
         if (BuildConfig.TOMOS_PREMIUM_PUBLIC_KEY.isNotBlank()) {
             val storedLicence = withContext(Dispatchers.IO) {
@@ -1257,6 +1268,21 @@ private fun TomSipScreen(engine: TomSipEngine) {
                         Text("One-time lifetime licence", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                         Text("Premium includes multiple SIP accounts, advanced codec controls and encrypted backups. Core SIP calling remains free.", color = Muted, fontSize = 12.sp)
                         Text(premiumMessage, color = Color.White, fontSize = 12.sp)
+                        OutlinedButton(
+                            onClick = {
+                                premiumQrScanner.launch(
+                                    ScanOptions()
+                                        .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+                                        .setPrompt("Scan your TomOS Premium activation QR code")
+                                        .setBeepEnabled(false)
+                                        .setOrientationLocked(false)
+                                )
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = !premiumBusy
+                        ) {
+                            Text("SCAN ACTIVATION QR CODE")
+                        }
                         OutlinedTextField(
                             value = premiumCode,
                             onValueChange = { premiumCode = it.uppercase().take(64) },
