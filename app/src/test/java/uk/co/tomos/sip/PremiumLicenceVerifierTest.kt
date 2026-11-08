@@ -22,6 +22,22 @@ class PremiumLicenceVerifierTest {
         assertNull(normalizeQrActivationCode("TOMOS-PREM-0000-0000-0000-0000"))
     }
 
+    @Test fun offlineLicenceQrParserAcceptsCompleteDeviceBoundDocument() {
+        val payload = """{"device_id":"123e4567-e89b-12d3-a456-426614174000"}"""
+        val qr = JSONObject()
+            .put("signature_algorithm", "Ed25519")
+            .put("signed_payload", "c2lnbmVk")
+            .put("signature", "c2lnbmF0dXJl")
+            .put("payload", JSONObject(payload))
+        assertEquals("123e4567-e89b-12d3-a456-426614174000", parseOfflineLicenceQr(qr.toString())?.getJSONObject("payload")?.getString("device_id"))
+    }
+
+    @Test fun offlineLicenceQrParserRejectsCodesMalformedJsonAndOversizedPayloads() {
+        assertNull(parseOfflineLicenceQr("TOMOS-PREM-ABCD-EFGH-IJKL-MNOP"))
+        assertNull(parseOfflineLicenceQr("{not-json}"))
+        assertNull(parseOfflineLicenceQr("x".repeat(64 * 1024 + 1)))
+        assertNull(parseOfflineLicenceQr("""{"signature_algorithm":"Ed25519","signed_payload":"abc","signature":"def","payload":{}}"""))
+    }
     @Test fun missingPublicKeyRejectsLicence() {
         assertFalse(PremiumLicenceVerifier("").verify(JSONObject(), "TOMOS-PREM-AAAA-BBBB-CCCC-DDDD"))
     }
@@ -88,6 +104,123 @@ class PremiumLicenceVerifierTest {
         assertTrue(verifier.verifyOffline(document, deviceId))
         assertFalse(verifier.verifyOffline(document, "123e4567-e89b-12d3-a456-426614174001"))
         assertFalse(verifier.verifyOffline(document, "not-a-device-id"))
+    }
+
+
+    private data class OfflineFixture(
+        val document: JSONObject,
+        val verifier: PremiumLicenceVerifier
+    )
+
+    private fun signedOfflineFixture(
+        mutatePayload: JSONObject.() -> Unit = {}
+    ): OfflineFixture {
+        val deviceId = "123e4567-e89b-12d3-a456-426614174000"
+        val payload = JSONObject()
+            .put("activation_code_sha256", "0".repeat(64))
+            .put("customer_reference", "security-test")
+            .put("device_id", deviceId)
+            .put("features", org.json.JSONArray(listOf(
+                "multiple_sip_accounts", "advanced_codec_controls", "encrypted_backup"
+            )))
+            .put("issued_at", "2026-11-08T00:00:00Z")
+            .put("licence_id", "00000000-0000-0000-0000-000000000003")
+            .put("licence_type", "lifetime")
+            .put("product", "tomos-sip")
+            .put("schema", 1)
+            .apply(mutatePayload)
+        val payloadBytes = payload.toString().toByteArray(Charsets.UTF_8)
+        val privateKey = Ed25519PrivateKeyParameters(java.security.SecureRandom())
+        val signer = Ed25519Signer().apply {
+            init(true, privateKey)
+            update(payloadBytes, 0, payloadBytes.size)
+        }
+        val spkiPrefix = byteArrayOf(0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00)
+        val publicPem = "-----BEGIN PUBLIC KEY-----\n" +
+            Base64.getEncoder().encodeToString(spkiPrefix + privateKey.generatePublicKey().encoded) +
+            "\n-----END PUBLIC KEY-----"
+        val document = JSONObject()
+            .put("signature_algorithm", "Ed25519")
+            .put("signed_payload", Base64.getEncoder().encodeToString(payloadBytes))
+            .put("signature", Base64.getEncoder().encodeToString(signer.generateSignature()))
+            .put("payload", JSONObject(payload.toString()))
+        return OfflineFixture(document, PremiumLicenceVerifier(publicPem))
+    }
+
+    @Test fun offlineVerifierRejectsForgedAndMalformedSignatures() {
+        val fixture = signedOfflineFixture()
+        assertTrue(fixture.verifier.verifyOffline(
+            fixture.document, "123e4567-e89b-12d3-a456-426614174000"
+        ))
+
+        val forged = JSONObject(fixture.document.toString())
+            .put("signature", Base64.getEncoder().encodeToString(ByteArray(64)))
+        assertFalse(fixture.verifier.verifyOffline(
+            forged, "123e4567-e89b-12d3-a456-426614174000"
+        ))
+
+        val shortSignature = JSONObject(fixture.document.toString())
+            .put("signature", Base64.getEncoder().encodeToString(ByteArray(63)))
+        assertFalse(fixture.verifier.verifyOffline(
+            shortSignature, "123e4567-e89b-12d3-a456-426614174000"
+        ))
+
+        val invalidBase64 = JSONObject(fixture.document.toString()).put("signature", "not-base64!")
+        assertFalse(fixture.verifier.verifyOffline(
+            invalidBase64, "123e4567-e89b-12d3-a456-426614174000"
+        ))
+    }
+
+    @Test fun offlineVerifierRejectsTamperedSignedPayloadAndMirror() {
+        val fixture = signedOfflineFixture()
+        val changedPayloadText = String(
+            Base64.getDecoder().decode(fixture.document.getString("signed_payload")),
+            Charsets.UTF_8
+        ).replace("security-test", "attacker-test")
+        val changedBytes = changedPayloadText.toByteArray(Charsets.UTF_8)
+        val tamperedSignatureInput = JSONObject(fixture.document.toString())
+            .put("signed_payload", Base64.getEncoder().encodeToString(changedBytes))
+            .put("payload", JSONObject(changedPayloadText))
+        assertFalse(fixture.verifier.verifyOffline(
+            tamperedSignatureInput, "123e4567-e89b-12d3-a456-426614174000"
+        ))
+
+        val changedMirror = JSONObject(fixture.document.toString()).apply {
+            getJSONObject("payload").put("customer_reference", "attacker-edited")
+        }
+        assertFalse(fixture.verifier.verifyOffline(
+            changedMirror, "123e4567-e89b-12d3-a456-426614174000"
+        ))
+    }
+
+    @Test fun offlineVerifierRejectsInvalidClaimsEvenWhenTheyAreCorrectlySigned() {
+        val deviceId = "123e4567-e89b-12d3-a456-426614174000"
+        val invalidFixtures = listOf(
+            signedOfflineFixture { put("licence_type", "subscription") },
+            signedOfflineFixture { put("product", "another-product") },
+            signedOfflineFixture { put("schema", 2) },
+            signedOfflineFixture { put("issued_at", "tomorrowZ") },
+            signedOfflineFixture { put("licence_id", "1-1-1-1-1") },
+            signedOfflineFixture {
+                put("features", org.json.JSONArray(listOf(
+                    "multiple_sip_accounts", "advanced_codec_controls", "encrypted_backup", "admin"
+                )))
+            }
+        )
+        invalidFixtures.forEach { fixture ->
+            assertFalse(
+                "Invalid signed claims must not verify: ${fixture.document}",
+                fixture.verifier.verifyOffline(fixture.document, deviceId)
+            )
+        }
+    }
+
+    @Test fun offlineVerifierRejectsNonCanonicalDeviceIds() {
+        val fixture = signedOfflineFixture()
+        assertFalse(fixture.verifier.verifyOffline(
+            fixture.document, "123e4567-e89b-12d3-a456-426614174000"
+                .replace("123e4567", "123E4567")
+        ))
     }
 
 }

@@ -17,6 +17,7 @@ import java.net.URL
 import java.nio.charset.StandardCharsets
 import java.security.KeyStore
 import java.security.MessageDigest
+import java.time.Instant
 import java.util.UUID
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -29,6 +30,19 @@ private val PREMIUM_FEATURES = listOf("multiple_sip_accounts", "advanced_codec_c
 internal fun normalizeQrActivationCode(value: String): String? {
     val normalized = value.filterNot(Char::isWhitespace).uppercase(Locale.ROOT)
     return normalized.takeIf { it.matches(Regex("TOMOS-PREM-(?:[A-Z2-7]{4}-){3}[A-Z2-7]{4}")) }
+}
+
+/** Parse a bounded QR payload containing a complete offline licence document. */
+internal fun parseOfflineLicenceQr(value: String): JSONObject? {
+    if (value.length !in 2..(64 * 1024)) return null
+    return runCatching {
+        JSONObject(value).takeIf { document ->
+            document.optString("signature_algorithm") == "Ed25519" &&
+                document.optJSONObject("payload")?.optString("device_id")?.isNotBlank() == true &&
+                document.optString("signed_payload").isNotBlank() &&
+                document.optString("signature").isNotBlank()
+        }
+    }.getOrNull()
 }
 
 /** Compare JSON values recursively without relying on platform-specific JSONObject helpers. */
@@ -53,8 +67,11 @@ class PremiumLicenceVerifier(private val publicKeyPem: String) {
     /** Verifies a serverless licence and enforces its signed installation UUID binding. */
     fun verifyOffline(document: JSONObject, deviceId: String): Boolean = runCatching {
         val normalizedDeviceId = UUID.fromString(deviceId).toString()
-        verifyDocument(document, null) &&
-            UUID.fromString(document.getJSONObject("payload").getString("device_id")).toString() == normalizedDeviceId
+        val payloadDeviceId = document.getJSONObject("payload").getString("device_id")
+        deviceId == normalizedDeviceId &&
+            UUID.fromString(payloadDeviceId).toString() == payloadDeviceId &&
+            verifyDocument(document, null) &&
+            payloadDeviceId == normalizedDeviceId
     }.getOrDefault(false)
 
     /** Re-verifies a locally stored licence after restart; the original code is not stored. */
@@ -69,9 +86,14 @@ class PremiumLicenceVerifier(private val publicKeyPem: String) {
         if (!jsonEquivalent(document.getJSONObject("payload"), payload)) return false
         if (payload.getInt("schema") != 1 || payload.getString("product") != PREMIUM_PRODUCT) return false
         if (payload.getString("licence_type") != "lifetime") return false
-        UUID.fromString(payload.getString("licence_id"))
+        val licenceId = payload.getString("licence_id")
+        require(UUID.fromString(licenceId).toString() == licenceId) {
+            "The Premium licence ID must be a canonical UUID."
+        }
         require(payload.getString("activation_code_sha256").matches(Regex("[0-9a-f]{64}")))
-        require(payload.getString("issued_at").endsWith("Z"))
+        val issuedAt = payload.getString("issued_at")
+        require(issuedAt.endsWith("Z")) { "The issue timestamp must be UTC." }
+        Instant.parse(issuedAt)
         val features = payload.getJSONArray("features")
         val received = (0 until features.length()).map { features.getString(it) }
         if (received != PREMIUM_FEATURES) return false
@@ -91,7 +113,9 @@ class PremiumLicenceVerifier(private val publicKeyPem: String) {
         val signer = Ed25519Signer()
         signer.init(false, Ed25519PublicKeyParameters(encoded.copyOfRange(spkiPrefix.size, encoded.size), 0))
         signer.update(signedPayload, 0, signedPayload.size)
-        signer.verifySignature(Base64.getDecoder().decode(document.getString("signature")))
+        val signature = Base64.getDecoder().decode(document.getString("signature"))
+        if (signature.size != 64) return false
+        signer.verifySignature(signature)
     }.getOrDefault(false)
 }
 

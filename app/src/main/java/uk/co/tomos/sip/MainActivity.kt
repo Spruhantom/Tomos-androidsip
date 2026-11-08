@@ -27,6 +27,20 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.animateContentSize
+import androidx.compose.ui.draw.scale
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -242,6 +256,13 @@ class TomSipEngine(context: android.content.Context) {
         private set
     var codecStatus by mutableStateOf("Codec preferences apply to new calls.")
         private set
+    var premiumLicenceActive by mutableStateOf(false)
+        private set
+
+    fun updatePremiumLicenceStatus(active: Boolean) {
+        premiumLicenceActive = active
+        if (!active) codecStatus = "Advanced codec controls require an active Premium licence."
+    }
     private val prefs = context.getSharedPreferences("tomos_sip", 0)
     private val profileStore = SipAccountProfileStore(context)
     private val credentialStore = SipCredentialStore(context)
@@ -600,6 +621,10 @@ class TomSipEngine(context: android.content.Context) {
     }
 
     fun setAudioCodecEnabled(id: String, enabled: Boolean) {
+        if (!premiumLicenceActive) {
+            codecStatus = "Advanced codec controls are a Premium feature. Scan your offline licence QR to unlock them."
+            return
+        }
         val payloadTypes = core.audioPayloadTypes
         val target = payloadTypes.firstOrNull { codecId(it) == id } ?: return
         if (!enabled && payloadTypes.count { it.enabled() } <= 1) {
@@ -646,6 +671,9 @@ class TomSipEngine(context: android.content.Context) {
                         it.transport == transportType &&
                         it.port == (sipPort.toIntOrNull() ?: 0)
                 }
+            require(existing != null || premiumLicenceActive || sipAccounts.isEmpty()) {
+                "Multiple SIP accounts are a Premium feature. Scan your offline licence QR to add another account."
+            }
             val profile = SipAccountProfile(
                 id = existing?.id ?: java.util.UUID.randomUUID().toString(),
                 label = displayName.trim().ifBlank { username.trim() },
@@ -755,6 +783,10 @@ class TomSipEngine(context: android.content.Context) {
                 }
             }
         } else {
+            if (!premiumLicenceActive && sipAccounts.count { it.enabled } >= 1) {
+                status = "Multiple SIP accounts are a Premium feature. Scan your offline licence QR to enable another account."
+                return
+            }
             val updated = current.copy(enabled = true)
             persistAccountProfile(updated)
             val secret = runCatching { credentialStore.read(accountId) }.getOrNull()
@@ -1022,10 +1054,43 @@ private fun TomSipScreen(engine: TomSipEngine) {
                                 ?: throw SecurityException("The saved licence could not be re-verified.")
                         }
                         premiumOfflineActive = true
-                        premiumMessage = "Offline lifetime licence imported, device ID matched and signature verified. Premium feature unlocking remains disabled pending final integration tests."
+                        engine.updatePremiumLicenceStatus(true)
+                        premiumMessage = "Premium activated. Your offline licence is verified and saved securely on this device."
                     } catch (error: Exception) {
                         premiumOfflineActive = false
                         premiumMessage = "Offline licence import failed: ${error.message ?: "invalid licence file"}"
+                    } finally {
+                        premiumBusy = false
+                    }
+                }
+            }
+        }
+    }
+    val offlineLicenceQrScanner = rememberLauncherForActivityResult(ScanContract()) { result ->
+        val rawPayload = result.contents
+        if (rawPayload != null) {
+            val document = parseOfflineLicenceQr(rawPayload)
+            if (document == null) {
+                premiumMessage = "This QR code does not contain a valid TomOS offline licence."
+            } else if (BuildConfig.TOMOS_PREMIUM_PUBLIC_KEY.isBlank()) {
+                premiumMessage = "Offline licence verification is not configured in this build."
+            } else {
+                premiumBusy = true
+                updateScope.launch {
+                    try {
+                        withContext(Dispatchers.IO) {
+                            val verifier = PremiumLicenceVerifier(BuildConfig.TOMOS_PREMIUM_PUBLIC_KEY)
+                            val store = SecurePremiumLicenceStore(context)
+                            store.importOffline(document, premiumDeviceId, verifier)
+                            store.loadVerifiedOffline(premiumDeviceId, verifier)
+                                ?: throw SecurityException("The saved licence could not be re-verified.")
+                        }
+                        premiumOfflineActive = true
+                        engine.updatePremiumLicenceStatus(true)
+                        premiumMessage = "Premium activated from QR. Your licence is verified and saved securely on this device."
+                    } catch (error: Exception) {
+                        premiumOfflineActive = false
+                        premiumMessage = "Offline QR import failed: ${error.message ?: "invalid licence"}"
                     } finally {
                         premiumBusy = false
                     }
@@ -1052,11 +1117,17 @@ private fun TomSipScreen(engine: TomSipEngine) {
             when (restored) {
                 true -> {
                     premiumOfflineActive = true
-                    premiumMessage = "Saved offline lifetime licence restored. Signature and installation ID verified. Premium feature unlocking remains disabled pending final integration tests."
+                    engine.updatePremiumLicenceStatus(true)
+                    premiumMessage = "Premium active. Saved offline licence signature and installation ID verified."
                 }
-                false -> premiumMessage = "Saved lifetime licence signature verified. Premium feature unlocking remains disabled in this build."
+                false -> {
+                    premiumOfflineActive = false
+                    engine.updatePremiumLicenceStatus(false)
+                    premiumMessage = "Saved licence signature is valid, but it is not bound to this installation. Premium remains locked."
+                }
                 null -> {
                     premiumOfflineActive = false
+                    engine.updatePremiumLicenceStatus(false)
                     premiumMessage = "No valid saved Premium licence was found for this installation."
                 }
             }
@@ -1184,6 +1255,7 @@ private fun TomSipScreen(engine: TomSipEngine) {
                             require(exportPassword.length >= 8) { "Use at least 8 characters." }
                             require(exportPassword == exportPasswordConfirm) { "The passwords do not match." }
                             val json = TomosBackupCodec.encode(engine.contacts, engine.history)
+                            check(engine.premiumLicenceActive) { "Encrypted backup export is a Premium feature. Scan your offline licence QR to unlock it." }
                             pendingExportBytes = TomosBackupEncryption.encrypt(json.toByteArray(Charsets.UTF_8), exportPassword.toCharArray())
                             showExportPasswordDialog = false
                             exportBackupLauncher.launch("tomos-sip-backup.tomos")
@@ -1257,7 +1329,7 @@ private fun TomSipScreen(engine: TomSipEngine) {
                             NavigationBarItem(
                                 selected = selectedTab == tab,
                                 onClick = { selectedTab = tab },
-                                icon = { Text(tabSymbols[tab] ?: "•", fontSize = 19.sp) },
+                                icon = { val iconScale by animateFloatAsState(targetValue = if (selectedTab == tab) 1.12f else 1f, animationSpec = tween(180), label = "navigation-icon-scale"); Text(tabSymbols[tab] ?: "•", modifier = Modifier.scale(iconScale), fontSize = 19.sp) },
                                 label = { Text(tab) },
                                 colors = NavigationBarItemDefaults.colors(
                                     selectedIconColor = Cyan, selectedTextColor = Cyan,
@@ -1277,7 +1349,7 @@ private fun TomSipScreen(engine: TomSipEngine) {
                         NavigationRailItem(
                             selected = selectedTab == tab,
                             onClick = { selectedTab = tab },
-                            icon = { Text(tabSymbols[tab] ?: "•", fontSize = 19.sp) },
+                            icon = { val iconScale by animateFloatAsState(targetValue = if (selectedTab == tab) 1.12f else 1f, animationSpec = tween(180), label = "navigation-icon-scale"); Text(tabSymbols[tab] ?: "•", modifier = Modifier.scale(iconScale), fontSize = 19.sp) },
                             label = { Text(tab) },
                             alwaysShowLabel = true,
                             colors = NavigationRailItemDefaults.colors(
@@ -1295,31 +1367,87 @@ private fun TomSipScreen(engine: TomSipEngine) {
         } else Column(
             Modifier.fillMaxWidth().widthIn(max = 1000.dp).align(Alignment.TopCenter)
                 .background(Brush.verticalGradient(listOf(Color(0xFF111426), Void, Color(0xFF090A12))))
+                .animateContentSize(animationSpec = tween(220))
                 .verticalScroll(rememberScrollState()).padding(if (isExpandedLayout) 28.dp else 22.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Box(Modifier.size(48.dp).border(1.dp, Pink, RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Box(
+                    Modifier.size(48.dp)
+                        .background(Panel, RoundedCornerShape(15.dp))
+                        .border(1.dp, Pink.copy(alpha = 0.8f), RoundedCornerShape(15.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
                     Text("T", color = Cyan, fontSize = 28.sp, fontWeight = FontWeight.Black)
                 }
-                Column {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text("TOM OS", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, letterSpacing = 3.sp)
-                    Text("SIP COMMUNICATOR", color = Cyan, fontSize = 11.sp, letterSpacing = 2.sp)
+                    Text("SIP COMMUNICATOR", color = Cyan, fontSize = 10.sp, letterSpacing = 1.8.sp)
                 }
                 Spacer(Modifier.weight(1f))
-                Text("v0.1.0", color = Muted, fontSize = 11.sp)
+                Surface(
+                    color = Panel,
+                    shape = RoundedCornerShape(50),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF34394D))
+                ) {
+                    Text("v" + BuildConfig.VERSION_NAME, color = Muted, fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp))
+                }
             }
-            if (selectedTab == "Dialler") {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("Your calls.", color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.Bold)
-                Text("Your network. Your control.", color = Pink, fontSize = 17.sp)
-            }
+            AnimatedContent(
+                targetState = selectedTab,
+                transitionSpec = {
+                    (fadeIn(tween(220)) + slideInVertically(tween(220)) { it / 8 }) togetherWith
+                        (fadeOut(tween(130)) + slideOutVertically(tween(130)) { -it / 12 })
+                },
+                label = "page-heading-transition"
+            ) { tab ->
+                val pageTitle = when (tab) {
+                    "Dialler" -> "Make a call"
+                    "Contacts" -> "Your contacts"
+                    "History" -> "Call history"
+                    "Settings" -> "App settings"
+                    "Premium" -> "TomOS SIP Premium"
+                    else -> "TomOS SIP"
+                }
+                val pageSubtitle = when (tab) {
+                    "Dialler" -> "Your network. Your control."
+                    "Contacts" -> "Keep the people you call close at hand."
+                    "History" -> "Review your recent conversations."
+                    "Settings" -> "Manage updates, accounts and preferences."
+                    "Premium" -> "One lifetime licence. More ways to stay in control."
+                    else -> "Your calls. Your control."
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(tab.uppercase(), color = Cyan, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+                    Text(pageTitle, color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+                    Text(pageSubtitle, color = Pink, fontSize = 14.sp)
+                }
             }
             if (selectedTab == "Premium") {
                 Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(20.dp)) {
                     Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Text("TOMOS SIP PREMIUM", color = Cyan, fontSize = 14.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
-                        Text("One-time lifetime licence", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("LIFETIME PLAN", color = Cyan, fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold, letterSpacing = 1.6.sp)
+                            Spacer(Modifier.weight(1f))
+                            Surface(
+                                color = (if (engine.premiumLicenceActive) Cyan else Muted).copy(alpha = 0.12f),
+                                shape = RoundedCornerShape(50)
+                            ) {
+                                Text(if (engine.premiumLicenceActive) "ACTIVE" else "FREE EDITION",
+                                    color = if (engine.premiumLicenceActive) Cyan else Muted,
+                                    fontSize = 9.sp, fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
+                            }
+                        }
+                        Text("TomOS SIP Premium", color = Color.White, fontSize = 22.sp,
+                            fontWeight = FontWeight.Bold)
+                        Text("One-time lifetime licence", color = Muted, fontSize = 13.sp)
                         Text("Premium includes multiple SIP accounts, advanced codec controls and encrypted backups. Core SIP calling remains free.", color = Muted, fontSize = 12.sp)
                         Text(premiumMessage, color = Color.White, fontSize = 12.sp)
                         Text("OFFLINE DEVICE ACTIVATION", color = Cyan, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
@@ -1338,6 +1466,21 @@ private fun TomSipScreen(engine: TomSipEngine) {
                             enabled = !premiumBusy && BuildConfig.TOMOS_PREMIUM_PUBLIC_KEY.isNotBlank()
                         ) {
                             Text(if (premiumBusy) "VERIFYING LICENCE…" else "IMPORT OFFLINE LICENCE FILE")
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                offlineLicenceQrScanner.launch(
+                                    ScanOptions()
+                                        .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+                                        .setPrompt("Scan the complete TomOS offline licence QR")
+                                        .setBeepEnabled(false)
+                                        .setOrientationLocked(false)
+                                )
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = !premiumBusy && BuildConfig.TOMOS_PREMIUM_PUBLIC_KEY.isNotBlank()
+                        ) {
+                            Text("SCAN LICENCE QR", fontWeight = FontWeight.Bold, letterSpacing = 0.4.sp)
                         }
                         Text(
                             if (BuildConfig.TOMOS_PREMIUM_PUBLIC_KEY.isBlank())
@@ -1389,7 +1532,11 @@ private fun TomSipScreen(engine: TomSipEngine) {
                                             { "Premium lifetime licence activated and verified." },
                                             { "Activation failed: ${it.message ?: "please try again"}" }
                                         )
-                                        if (result.isSuccess) premiumCode = ""
+                                        if (result.isSuccess) {
+                                            premiumCode = ""
+                                            premiumOfflineActive = true
+                                            engine.updatePremiumLicenceStatus(true)
+                                        }
                                         premiumBusy = false
                                     }
                                 }
@@ -1504,16 +1651,37 @@ private fun TomSipScreen(engine: TomSipEngine) {
                 }
             }
             }
-            Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(20.dp)) {
-                Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Card(
+                modifier = Modifier.fillMaxWidth().border(
+                    1.dp, (if (engine.registered) Cyan else Pink).copy(alpha = 0.28f), RoundedCornerShape(20.dp)
+                ),
+                colors = CardDefaults.cardColors(containerColor = Panel),
+                shape = RoundedCornerShape(20.dp)
+            ) {
+                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("ACCOUNT STATUS", color = Muted, fontSize = 11.sp, letterSpacing = 1.5.sp)
+                        Text("SIP ACCOUNT", color = Muted, fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold, letterSpacing = 1.6.sp)
                         Spacer(Modifier.weight(1f))
-                        Box(Modifier.size(8.dp).background(if (engine.registered) Cyan else Pink, RoundedCornerShape(50)))
-                        Spacer(Modifier.width(7.dp))
-                        Text(if (engine.registered) "ONLINE" else "OFFLINE", color = if (engine.registered) Cyan else Pink, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Surface(
+                            color = (if (engine.registered) Cyan else Pink).copy(alpha = 0.12f),
+                            shape = RoundedCornerShape(50)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Box(Modifier.size(7.dp).background(
+                                    if (engine.registered) Cyan else Pink, RoundedCornerShape(50)
+                                ))
+                                Text(if (engine.registered) "REGISTERED" else "NOT REGISTERED",
+                                    color = if (engine.registered) Cyan else Pink,
+                                    fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp)
+                            }
+                        }
                     }
-                    Text(engine.status, color = Color.White, fontSize = 15.sp)
+                    Text(engine.status, color = Color.White, fontSize = 14.sp, lineHeight = 20.sp)
                 }
             }
             if (selectedTab == "Dialler") {
@@ -1650,7 +1818,7 @@ private fun TomSipScreen(engine: TomSipEngine) {
                         Switch(checked = backupRemindersEnabled, onCheckedChange = { backupRemindersEnabled = it })
                     }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { showExportPasswordDialog = true }, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = Cyan, contentColor = Void)) { Text("ENCRYPT & EXPORT") }
+                        Button(onClick = { showExportPasswordDialog = true }, enabled = engine.premiumLicenceActive, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = Cyan, contentColor = Void)) { Text(if (engine.premiumLicenceActive) "ENCRYPT & EXPORT" else "PREMIUM: ENCRYPT") }
                         OutlinedButton(onClick = { importBackupLauncher.launch(arrayOf("application/json", "text/json", "application/octet-stream", "*/*")) }, modifier = Modifier.weight(1f)) { Text("IMPORT BACKUP") }
                     }
                     Text("AES-256-GCM encryption protects the backup with your password. SIP credentials are deliberately excluded. Keep both the file and password safe outside the app; a forgotten password cannot be recovered.", color = Muted, fontSize = 11.sp)
@@ -1761,11 +1929,12 @@ private fun TomSipScreen(engine: TomSipEngine) {
                             Checkbox(
                                 checked = codec.enabled,
                                 onCheckedChange = { engine.setAudioCodecEnabled(codec.id, it) },
+                                enabled = engine.premiumLicenceActive,
                                 colors = CheckboxDefaults.colors(checkedColor = Cyan, uncheckedColor = Muted)
                             )
                         }
                     }
-                    Text(engine.codecStatus, color = Muted, fontSize = 11.sp)
+                    Text(if (engine.premiumLicenceActive) engine.codecStatus else "Advanced codec controls are locked. Scan a valid offline Premium QR to unlock per-codec settings.", color = Muted, fontSize = 11.sp)
                 }
             }
             }
@@ -1780,6 +1949,10 @@ private fun TomSipScreen(engine: TomSipEngine) {
 @Composable
 private fun ActiveCallScreen(engine: TomSipEngine, elapsedSeconds: Int, modifier: Modifier = Modifier) {
     val isIncoming = engine.incomingCaller != null
+    val callPulse = rememberInfiniteTransition(label = "active-call-pulse")
+        .animateFloat(initialValue = 1f, targetValue = 1.045f,
+            animationSpec = infiniteRepeatable(tween(1100), repeatMode = RepeatMode.Reverse),
+            label = "active-call-avatar-scale")
     Column(
         modifier.background(Brush.verticalGradient(listOf(Void, Color(0xFF111326))))
             .padding(horizontal = 24.dp, vertical = 28.dp),
@@ -1789,7 +1962,7 @@ private fun ActiveCallScreen(engine: TomSipEngine, elapsedSeconds: Int, modifier
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("TOMOS SIP", color = Cyan, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 3.sp)
             Spacer(Modifier.height(24.dp))
-            Box(Modifier.size(112.dp).background(Panel, RoundedCornerShape(56.dp))
+            Box(Modifier.size(112.dp).scale(callPulse.value).background(Panel, RoundedCornerShape(56.dp))
                 .border(2.dp, Cyan.copy(alpha = 0.65f), RoundedCornerShape(56.dp)), contentAlignment = Alignment.Center) {
                 Text("☎", color = Cyan, fontSize = 48.sp)
             }
