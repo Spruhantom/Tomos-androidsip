@@ -4,13 +4,27 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+val premiumApiUrl = providers.gradleProperty("tomosPremiumApiUrl")
+    .orElse(providers.environmentVariable("TOMOS_PREMIUM_API_URL"))
+    .orElse("")
+    .get()
+val premiumPublicKey = providers.gradleProperty("tomosPremiumPublicKey")
+    .orElse(providers.environmentVariable("TOMOS_PREMIUM_PUBLIC_KEY"))
+    .orElse("")
+    .get()
+val escapedPremiumPublicKey = premiumPublicKey
+    .replace("\\", "\\\\")
+    .replace("\"", "\\\"")
+    .replace("\r", "")
+    .replace("\n", "\\n")
+
 android {
     namespace = "uk.co.tomos.sip"
     compileSdk = 35
 
     defaultConfig {
-        buildConfigField("String", "TOMOS_PREMIUM_API_URL", "\"${providers.gradleProperty("tomosPremiumApiUrl").orElse("").get()}\"")
-        buildConfigField("String", "TOMOS_PREMIUM_PUBLIC_KEY", "\"${providers.gradleProperty("tomosPremiumPublicKey").orElse("").get()}\"")
+        buildConfigField("String", "TOMOS_PREMIUM_API_URL", "\"$premiumApiUrl\"")
+        buildConfigField("String", "TOMOS_PREMIUM_PUBLIC_KEY", "\"$escapedPremiumPublicKey\"")
         applicationId = "uk.co.tomos.sip"
         minSdk = 26
         targetSdk = 35
@@ -30,6 +44,34 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true; buildConfig = true }
+}
+
+// Release APKs must never be published with an empty, malformed, or test-only
+// Premium verification key. Debug builds intentionally remain buildable without
+// production signing material so contributors can work on the free SIP client.
+tasks.matching { it.name == "preReleaseBuild" }.configureEach {
+    doFirst {
+        require(premiumPublicKey.isNotBlank()) {
+            "Release builds require -PtomosPremiumPublicKey or TOMOS_PREMIUM_PUBLIC_KEY."
+        }
+        val pemBody = premiumPublicKey
+            .replace("-----BEGIN PUBLIC KEY-----", "")
+            .replace("-----END PUBLIC KEY-----", "")
+            .filterNot { it.isWhitespace() }
+        val decoded = runCatching { java.util.Base64.getDecoder().decode(pemBody) }.getOrNull()
+        val ed25519SubjectPublicKeyInfoPrefix = byteArrayOf(
+            0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65,
+            0x70, 0x03, 0x21, 0x00
+        )
+        require(decoded != null && decoded.size == 44 &&
+            decoded.copyOfRange(0, ed25519SubjectPublicKeyInfoPrefix.size)
+                .contentEquals(ed25519SubjectPublicKeyInfoPrefix)) {
+            "TOMOS_PREMIUM_PUBLIC_KEY must be a valid Ed25519 SubjectPublicKeyInfo PEM public key."
+        }
+        require(!premiumPublicKey.contains("PRIVATE KEY")) {
+            "Only the Ed25519 public key may be embedded in the Android application."
+        }
+    }
 }
 
 dependencies {
