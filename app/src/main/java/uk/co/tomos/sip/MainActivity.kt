@@ -1378,6 +1378,7 @@ private fun TomSipScreen(engine: TomSipEngine) {
                     Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Text("TOMOS SIP PREMIUM", color = Cyan, fontSize = 14.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
                         Text("One-time lifetime licence", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                        Text(if (engine.premiumLicenceActive) "PREMIUM ACTIVE • All included features unlocked" else "FREE EDITION • Scan a valid device-bound licence QR to activate", color = if (engine.premiumLicenceActive) Cyan else Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         Text("Premium includes multiple SIP accounts, advanced codec controls and encrypted backups. Core SIP calling remains free.", color = Muted, fontSize = 12.sp)
                         Text(premiumMessage, color = Color.White, fontSize = 12.sp)
                         Text("OFFLINE DEVICE ACTIVATION", color = Cyan, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
@@ -1462,7 +1463,11 @@ private fun TomSipScreen(engine: TomSipEngine) {
                                             { "Premium lifetime licence activated and verified." },
                                             { "Activation failed: ${it.message ?: "please try again"}" }
                                         )
-                                        if (result.isSuccess) premiumCode = ""
+                                        if (result.isSuccess) {
+                                            premiumCode = ""
+                                            premiumOfflineActive = true
+                                            engine.setPremiumLicenceActive(true)
+                                        }
                                         premiumBusy = false
                                     }
                                 }
