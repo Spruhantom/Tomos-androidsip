@@ -42,7 +42,7 @@ jobs:
 
   premium-persistence-tests:
     name: Test Premium licence persistence on Android
-    runs-on: macos-14
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - name: Check out source
@@ -67,6 +67,7 @@ jobs:
           target: google_apis
           disable-animations: true
           emulator-boot-timeout: 600
+          disable-linux-hw-accel: false
           script: |
             mkdir -p app/build/reports/androidTests/connected
             trap 'adb logcat -d > app/build/reports/androidTests/connected/emulator-logcat.txt 2>&1 || true' EXIT
