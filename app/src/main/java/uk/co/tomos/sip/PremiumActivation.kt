@@ -95,6 +95,18 @@ class PremiumLicenceVerifier(private val publicKeyPem: String) {
     }.getOrDefault(false)
 }
 
+/** Stable per-installation UUID shared by the Premium UI and activation clients. */
+object PremiumInstallationId {
+    fun get(context: Context): String {
+        val prefs = context.getSharedPreferences("tomos_premium_installation", Context.MODE_PRIVATE)
+        return prefs.getString("installation_id", null) ?: UUID.randomUUID().toString().also {
+            check(prefs.edit().putString("installation_id", it).commit()) {
+                "Unable to save this installation's Premium device ID."
+            }
+        }
+    }
+}
+
 /** Redeems an activation code over HTTPS and verifies the returned signed licence. */
 class PremiumActivationClient(
     private val context: Context,
@@ -132,12 +144,7 @@ class PremiumActivationClient(
         }
     }
 
-    private fun installationId(): String {
-        val prefs = context.getSharedPreferences("tomos_premium_installation", Context.MODE_PRIVATE)
-        return prefs.getString("installation_id", null) ?: UUID.randomUUID().toString().also {
-            prefs.edit().putString("installation_id", it).apply()
-        }
-    }
+    private fun installationId(): String = PremiumInstallationId.get(context)
 }
 
 /** Stores the signed licence encrypted with an Android Keystore AES-GCM key. */
