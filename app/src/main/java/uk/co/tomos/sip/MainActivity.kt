@@ -1335,11 +1335,18 @@ private fun TomSipScreen(engine: TomSipEngine) {
                         OutlinedButton(
                             onClick = { offlineLicencePicker.launch(arrayOf("application/json", "text/json", "*/*")) },
                             modifier = Modifier.fillMaxWidth(),
-                            enabled = !premiumBusy
+                            enabled = !premiumBusy && BuildConfig.TOMOS_PREMIUM_PUBLIC_KEY.isNotBlank()
                         ) {
                             Text(if (premiumBusy) "VERIFYING LICENCE…" else "IMPORT OFFLINE LICENCE FILE")
                         }
-                        Text("The imported file is checked against this installation ID and its Ed25519 signature, then stored encrypted with Android Keystore.", color = Muted, fontSize = 11.sp)
+                        Text(
+                            if (BuildConfig.TOMOS_PREMIUM_PUBLIC_KEY.isBlank())
+                                "Licence verification is not configured in this build. A release build must be supplied the production Ed25519 public key; the shared CI fixture key is rejected."
+                            else
+                                "The imported file is checked against this installation ID and the configured Ed25519 public key, then stored encrypted with Android Keystore.",
+                            color = Muted,
+                            fontSize = 11.sp
+                        )
                         Divider(color = Color(0xFF34394D))
                         Text("ONLINE ACTIVATION (OPTIONAL)", color = Cyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         OutlinedButton(
@@ -1388,12 +1395,18 @@ private fun TomSipScreen(engine: TomSipEngine) {
                                 }
                             },
                             modifier = Modifier.fillMaxWidth(),
-                            enabled = !premiumBusy && premiumCode.isNotBlank(),
+                            enabled = !premiumBusy && premiumCode.isNotBlank() &&
+                                BuildConfig.TOMOS_PREMIUM_API_URL.isNotBlank() &&
+                                BuildConfig.TOMOS_PREMIUM_PUBLIC_KEY.isNotBlank(),
                             colors = ButtonDefaults.buttonColors(containerColor = Cyan, contentColor = Void)
                         ) {
                             Text(if (premiumBusy) "VERIFYING…" else "ACTIVATE PREMIUM")
                         }
-                        Text("Online activation requires an internet connection. Offline file import does not. Reinstalling or clearing app data may create a new installation ID and require a reissued licence.", color = Muted, fontSize = 11.sp)
+                        Text(
+                            "Online activation requires an HTTPS licence-service URL and an internet connection. Offline file import only needs the production public key. Reinstalling or clearing app data may create a new installation ID and require a reissued licence.",
+                            color = Muted,
+                            fontSize = 11.sp
+                        )
                     }
                 }
             }
