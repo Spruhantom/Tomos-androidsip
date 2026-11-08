@@ -44,7 +44,7 @@ jobs:
     name: Test Premium licence persistence on Android
     # GitHub-hosted Linux runners do not expose usable KVM to this job.
     # macOS provides native hardware acceleration for the Android emulator.
-    runs-on: macos-15-intel
+    runs-on: macos-15
     timeout-minutes: 30
     steps:
       - name: Check out source
@@ -57,7 +57,7 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
         with:
-          packages: platform-tools emulator platforms;android-35 system-images;android-35;google_apis;x86_64
+          packages: platform-tools emulator platforms;android-35 system-images;android-35;google_apis;arm64-v8a
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
       - name: Record emulator host diagnostics
@@ -70,11 +70,13 @@ jobs:
           command -v emulator || true
           adb version || true
           if [ -x "${ANDROID_HOME}/emulator/emulator" ]; then "${ANDROID_HOME}/emulator/emulator" -version || true; fi
+      - name: Pre-build Android instrumentation APKs
+        run: gradle --no-daemon --stacktrace --console=plain assembleDebug assembleDebugAndroidTest
       - name: Run Android Keystore persistence tests
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
-          arch: x86_64
+          arch: arm64-v8a
           profile: pixel_2
           target: google_apis
           disable-animations: true
@@ -93,7 +95,7 @@ jobs:
             # The emulator runner executes script lines individually, so keep Python commands on one line.
             python3 -c 'import subprocess,sys; sys.exit(subprocess.run(["adb","-s","emulator-5554","shell","getprop","sys.boot_completed"],check=True,capture_output=True,text=True,timeout=30).stdout.strip() != "1")'
             # Bound the instrumentation run; the emulator action invokes each script line separately.
-            python3 -c 'import subprocess,sys; sys.exit(subprocess.run(["gradle","--no-daemon","--stacktrace","--console=plain","connectedDebugAndroidTest"],timeout=600).returncode)'
+            python3 -c 'import subprocess,sys; sys.exit(subprocess.run(["gradle","--no-daemon","--stacktrace","--console=plain","connectedDebugAndroidTest"],timeout=900).returncode)'
       - name: Collect emulator diagnostics
         if: always()
         run: |
