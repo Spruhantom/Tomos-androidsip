@@ -79,11 +79,15 @@ jobs:
           target: google_apis
           disable-animations: true
           emulator-boot-timeout: 900
-          # Use the macOS host GPU backend; SwiftShader's Linux-oriented
-          # backend can leave macOS emulator instances disconnected from adb.
-          emulator-options: -no-window -gpu host -no-snapshot -noaudio -no-boot-anim
+          # API 35 recommends software rendering on macOS; host OpenGL is deprecated.
+          emulator-options: -no-window -gpu software -no-snapshot -noaudio -no-boot-anim
+          # Ensure the ADB daemon is listening before the emulator process starts.
+          pre-emulator-launch-script: |
+            adb start-server
+            adb devices -l
           script: |
             mkdir -p app/build/reports/androidTests/connected
+            adb start-server
             adb devices -l
             adb -s emulator-5554 wait-for-device
             python3 - <<'PY'
