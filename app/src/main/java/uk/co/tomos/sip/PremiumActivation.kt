@@ -31,6 +31,19 @@ internal fun normalizeQrActivationCode(value: String): String? {
     return normalized.takeIf { it.matches(Regex("TOMOS-PREM-(?:[A-Z2-7]{4}-){3}[A-Z2-7]{4}")) }
 }
 
+/** Parse a bounded QR payload containing a complete offline licence document. */
+internal fun parseOfflineLicenceQr(value: String): JSONObject? {
+    if (value.length !in 2..(64 * 1024)) return null
+    return runCatching {
+        JSONObject(value).takeIf { document ->
+            document.optString("signature_algorithm") == "Ed25519" &&
+                document.optJSONObject("payload")?.optString("device_id")?.isNotBlank() == true &&
+                document.optString("signed_payload").isNotBlank() &&
+                document.optString("signature").isNotBlank()
+        }
+    }.getOrNull()
+}
+
 /** Compare JSON values recursively without relying on platform-specific JSONObject helpers. */
 private fun jsonEquivalent(left: Any?, right: Any?): Boolean {
     if (left is JSONObject && right is JSONObject) {
