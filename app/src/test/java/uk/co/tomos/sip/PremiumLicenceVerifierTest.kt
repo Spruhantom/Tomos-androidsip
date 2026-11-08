@@ -88,6 +88,24 @@ class PremiumLicenceVerifierTest {
         assertTrue(verifier.verifyOffline(document, deviceId))
         assertFalse(verifier.verifyOffline(document, "123e4567-e89b-12d3-a456-426614174001"))
         assertFalse(verifier.verifyOffline(document, "not-a-device-id"))
+
+        // A changed signature must never be accepted, even with the correct device ID.
+        val signatureBytes = Base64.getDecoder().decode(document.getString("signature"))
+        signatureBytes[0] = (signatureBytes[0].toInt() xor 0x01).toByte()
+        val invalidSignature = JSONObject(document.toString())
+            .put("signature", Base64.getEncoder().encodeToString(signatureBytes))
+        assertFalse(verifier.verifyOffline(invalidSignature, deviceId))
+
+        // Changing the signed bytes and mirror together must still fail Ed25519 verification.
+        val tamperedCanonical = canonical.replace("offline-test", "tampered-test")
+        val tamperedBytes = tamperedCanonical.toByteArray(Charsets.UTF_8)
+        val tamperedDocument = JSONObject(document.toString())
+            .put("signed_payload", Base64.getEncoder().encodeToString(tamperedBytes))
+            .put("payload", JSONObject(tamperedCanonical))
+        assertFalse(verifier.verifyOffline(tamperedDocument, deviceId))
+
+        // The import boundary must reject invalid signatures before storing anything.
+        assertFalse(verifier.verifyOffline(JSONObject().put("signature_algorithm", "Ed25519"), deviceId))
     }
 
 }
