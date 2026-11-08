@@ -145,6 +145,20 @@ class SecurePremiumLicenceStore(context: Context) {
     private val prefs = context.getSharedPreferences("tomos_premium_licence", Context.MODE_PRIVATE)
     private val alias = "tomos_premium_licence_aes"
 
+    /** Import a signed offline licence only after signature and device binding both pass. */
+    fun importOffline(document: JSONObject, deviceId: String, verifier: PremiumLicenceVerifier) {
+        if (!verifier.verifyOffline(document, deviceId)) {
+            throw SecurityException("This offline Premium licence is invalid or belongs to another device.")
+        }
+        save(document.toString())
+    }
+
+    /** Load and re-check a stored offline licence against this installation after restart. */
+    fun loadVerifiedOffline(deviceId: String, verifier: PremiumLicenceVerifier): JSONObject? = runCatching {
+        val stored = load() ?: return null
+        JSONObject(stored).takeIf { verifier.verifyOffline(it, deviceId) }
+    }.getOrNull()
+
     fun save(value: String) {
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
