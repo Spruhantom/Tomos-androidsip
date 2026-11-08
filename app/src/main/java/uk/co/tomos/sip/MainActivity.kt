@@ -242,6 +242,13 @@ class TomSipEngine(context: android.content.Context) {
         private set
     var codecStatus by mutableStateOf("Codec preferences apply to new calls.")
         private set
+    var premiumLicenceActive by mutableStateOf(false)
+        private set
+
+    fun setPremiumLicenceActive(active: Boolean) {
+        premiumLicenceActive = active
+        if (!active) codecStatus = "Advanced codec controls require an active Premium licence."
+    }
     private val prefs = context.getSharedPreferences("tomos_sip", 0)
     private val profileStore = SipAccountProfileStore(context)
     private val credentialStore = SipCredentialStore(context)
@@ -600,6 +607,10 @@ class TomSipEngine(context: android.content.Context) {
     }
 
     fun setAudioCodecEnabled(id: String, enabled: Boolean) {
+        if (!premiumLicenceActive) {
+            codecStatus = "Advanced codec controls are a Premium feature. Scan your offline licence QR to unlock them."
+            return
+        }
         val payloadTypes = core.audioPayloadTypes
         val target = payloadTypes.firstOrNull { codecId(it) == id } ?: return
         if (!enabled && payloadTypes.count { it.enabled() } <= 1) {
@@ -646,6 +657,9 @@ class TomSipEngine(context: android.content.Context) {
                         it.transport == transportType &&
                         it.port == (sipPort.toIntOrNull() ?: 0)
                 }
+            require(existing != null || premiumLicenceActive || sipAccounts.none { it.enabled }) {
+                "Multiple SIP accounts are a Premium feature. Scan your offline licence QR to add another account."
+            }
             val profile = SipAccountProfile(
                 id = existing?.id ?: java.util.UUID.randomUUID().toString(),
                 label = displayName.trim().ifBlank { username.trim() },
@@ -755,6 +769,10 @@ class TomSipEngine(context: android.content.Context) {
                 }
             }
         } else {
+            if (!premiumLicenceActive && sipAccounts.count { it.enabled } >= 1) {
+                status = "Multiple SIP accounts are a Premium feature. Scan your offline licence QR to enable another account."
+                return
+            }
             val updated = current.copy(enabled = true)
             persistAccountProfile(updated)
             val secret = runCatching { credentialStore.read(accountId) }.getOrNull()
@@ -1022,7 +1040,8 @@ private fun TomSipScreen(engine: TomSipEngine) {
                                 ?: throw SecurityException("The saved licence could not be re-verified.")
                         }
                         premiumOfflineActive = true
-                        premiumMessage = "Offline lifetime licence imported, device ID matched and signature verified. Premium feature unlocking remains disabled pending final integration tests."
+                        engine.setPremiumLicenceActive(true)
+                        premiumMessage = "Premium activated. Your offline licence is verified and saved securely on this device."
                     } catch (error: Exception) {
                         premiumOfflineActive = false
                         premiumMessage = "Offline licence import failed: ${error.message ?: "invalid licence file"}"
@@ -1053,7 +1072,8 @@ private fun TomSipScreen(engine: TomSipEngine) {
                                 ?: throw SecurityException("The saved licence could not be re-verified.")
                         }
                         premiumOfflineActive = true
-                        premiumMessage = "Offline QR licence imported. Signature verified, device ID matched and licence stored securely. Premium feature unlocking remains gated pending final integration tests."
+                        engine.setPremiumLicenceActive(true)
+                        premiumMessage = "Premium activated from QR. Your licence is verified and saved securely on this device."
                     } catch (error: Exception) {
                         premiumOfflineActive = false
                         premiumMessage = "Offline QR import failed: ${error.message ?: "invalid licence"}"
@@ -1083,11 +1103,17 @@ private fun TomSipScreen(engine: TomSipEngine) {
             when (restored) {
                 true -> {
                     premiumOfflineActive = true
-                    premiumMessage = "Saved offline lifetime licence restored. Signature and installation ID verified. Premium feature unlocking remains disabled pending final integration tests."
+                    engine.setPremiumLicenceActive(true)
+                    premiumMessage = "Premium active. Saved offline licence signature and installation ID verified."
                 }
-                false -> premiumMessage = "Saved lifetime licence signature verified. Premium feature unlocking remains disabled in this build."
+                false -> {
+                    premiumOfflineActive = false
+                    engine.setPremiumLicenceActive(false)
+                    premiumMessage = "Saved licence signature is valid, but it is not bound to this installation. Premium remains locked."
+                }
                 null -> {
                     premiumOfflineActive = false
+                    engine.setPremiumLicenceActive(false)
                     premiumMessage = "No valid saved Premium licence was found for this installation."
                 }
             }
@@ -1215,6 +1241,7 @@ private fun TomSipScreen(engine: TomSipEngine) {
                             require(exportPassword.length >= 8) { "Use at least 8 characters." }
                             require(exportPassword == exportPasswordConfirm) { "The passwords do not match." }
                             val json = TomosBackupCodec.encode(engine.contacts, engine.history)
+                            check(engine.premiumLicenceActive) { "Encrypted backup export is a Premium feature. Scan your offline licence QR to unlock it." }
                             pendingExportBytes = TomosBackupEncryption.encrypt(json.toByteArray(Charsets.UTF_8), exportPassword.toCharArray())
                             showExportPasswordDialog = false
                             exportBackupLauncher.launch("tomos-sip-backup.tomos")
@@ -1696,7 +1723,10 @@ private fun TomSipScreen(engine: TomSipEngine) {
                         Switch(checked = backupRemindersEnabled, onCheckedChange = { backupRemindersEnabled = it })
                     }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { showExportPasswordDialog = true }, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = Cyan, contentColor = Void)) { Text("ENCRYPT & EXPORT") }
+                        Button(onClick = {
+                            if (engine.premiumLicenceActive) showExportPasswordDialog = true
+                            else backupMessage = "Encrypted backup export is a Premium feature. Scan your offline licence QR to unlock it."
+                        }, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = Cyan, contentColor = Void)) { Text("ENCRYPT & EXPORT") }
                         OutlinedButton(onClick = { importBackupLauncher.launch(arrayOf("application/json", "text/json", "application/octet-stream", "*/*")) }, modifier = Modifier.weight(1f)) { Text("IMPORT BACKUP") }
                     }
                     Text("AES-256-GCM encryption protects the backup with your password. SIP credentials are deliberately excluded. Keep both the file and password safe outside the app; a forgotten password cannot be recovered.", color = Muted, fontSize = 11.sp)
