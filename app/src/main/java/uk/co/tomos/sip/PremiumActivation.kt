@@ -133,9 +133,13 @@ object PremiumInstallationId {
 
 /** Redeems an activation code over HTTPS and verifies the returned signed licence. */
 class PremiumActivationClient(
-    private val context: Context,
     private val endpoint: String,
-    private val verifier: PremiumLicenceVerifier
+    private val verifier: PremiumLicenceVerifier,
+    private val installationId: () -> String,
+    private val saveLicence: (JSONObject) -> Unit,
+    private val openConnection: (URL) -> HttpURLConnection = {
+        it.openConnection() as HttpURLConnection
+    }
 ) {
     suspend fun redeem(code: String): Result<JSONObject> = withContext(Dispatchers.IO) {
         runCatching {
@@ -143,7 +147,7 @@ class PremiumActivationClient(
             val normalizedCode = normalizeQrActivationCode(code)
                 ?: throw IllegalArgumentException("Activation code format is invalid.")
             val deviceId = installationId()
-            val connection = (URL(endpoint.trimEnd('/') + "/v1/redeem").openConnection() as HttpURLConnection)
+            val connection = openConnection(URL(endpoint.trimEnd('/') + "/v1/redeem"))
             try {
                 connection.connectTimeout = 10_000
                 connection.readTimeout = 15_000
@@ -162,13 +166,12 @@ class PremiumActivationClient(
                 }
                 val licence = JSONObject(responseText).getJSONObject("licence")
                 if (!verifier.verify(licence, normalizedCode)) throw SecurityException("The returned Premium licence could not be verified.")
-                SecurePremiumLicenceStore(context).save(licence.toString())
+                saveLicence(licence)
                 licence
             } finally { connection.disconnect() }
         }
     }
 
-    private fun installationId(): String = PremiumInstallationId.get(context)
 }
 
 /** Stores the signed licence encrypted with an Android Keystore AES-GCM key. */
