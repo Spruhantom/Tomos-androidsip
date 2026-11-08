@@ -46,8 +46,8 @@ android {
     buildFeatures { compose = true; buildConfig = true }
 }
 
-// Release APKs must never be published with an empty, malformed, or test-only
-// Premium verification key. Debug builds intentionally remain buildable without
+// Release APKs must never be published with an empty, malformed, or the shared
+// cross-language fixture key as their Premium verification key. Debug builds intentionally remain buildable without
 // production signing material so contributors can work on the free SIP client.
 tasks.matching { it.name == "preReleaseBuild" }.configureEach {
     doFirst {
@@ -63,10 +63,16 @@ tasks.matching { it.name == "preReleaseBuild" }.configureEach {
             0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65,
             0x70, 0x03, 0x21, 0x00
         )
-        require(decoded != null && decoded.size == 44 &&
+        require(premiumPublicKey.trim().startsWith("-----BEGIN PUBLIC KEY-----") &&
+            premiumPublicKey.trim().endsWith("-----END PUBLIC KEY-----") &&
+            decoded != null && decoded.size == 44 &&
             decoded.copyOfRange(0, ed25519SubjectPublicKeyInfoPrefix.size)
                 .contentEquals(ed25519SubjectPublicKeyInfoPrefix)) {
             "TOMOS_PREMIUM_PUBLIC_KEY must be a valid Ed25519 SubjectPublicKeyInfo PEM public key."
+        }
+        require(java.util.Base64.getEncoder().encodeToString(decoded) !=
+            "MCowBQYDK2VwAyEAebVWLo/mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ=") {
+            "The shared cross-language CI fixture key is test-only and cannot be used for release builds."
         }
         require(!premiumPublicKey.contains("PRIVATE KEY")) {
             "Only the Ed25519 public key may be embedded in the Android application."
