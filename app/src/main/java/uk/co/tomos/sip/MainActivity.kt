@@ -1356,29 +1356,75 @@ private fun TomSipScreen(engine: TomSipEngine) {
                 .verticalScroll(rememberScrollState()).padding(if (isExpandedLayout) 28.dp else 22.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Box(Modifier.size(48.dp).border(1.dp, Pink, RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Box(
+                    Modifier.size(48.dp)
+                        .background(Panel, RoundedCornerShape(15.dp))
+                        .border(1.dp, Pink.copy(alpha = 0.8f), RoundedCornerShape(15.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
                     Text("T", color = Cyan, fontSize = 28.sp, fontWeight = FontWeight.Black)
                 }
-                Column {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text("TOM OS", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, letterSpacing = 3.sp)
-                    Text("SIP COMMUNICATOR", color = Cyan, fontSize = 11.sp, letterSpacing = 2.sp)
+                    Text("SIP COMMUNICATOR", color = Cyan, fontSize = 10.sp, letterSpacing = 1.8.sp)
                 }
                 Spacer(Modifier.weight(1f))
-                Text("v0.1.0", color = Muted, fontSize = 11.sp)
+                Surface(
+                    color = Panel,
+                    shape = RoundedCornerShape(50),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF34394D))
+                ) {
+                    Text("v" + BuildConfig.VERSION_NAME, color = Muted, fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp))
+                }
             }
-            if (selectedTab == "Dialler") {
+            val pageTitle = when (selectedTab) {
+                "Dialler" -> "Make a call"
+                "Contacts" -> "Your contacts"
+                "History" -> "Call history"
+                "Settings" -> "App settings"
+                "Premium" -> "TomOS SIP Premium"
+                else -> "TomOS SIP"
+            }
+            val pageSubtitle = when (selectedTab) {
+                "Dialler" -> "Your network. Your control."
+                "Contacts" -> "Keep the people you call close at hand."
+                "History" -> "Review your recent conversations."
+                "Settings" -> "Manage updates, accounts and preferences."
+                "Premium" -> "One lifetime licence. More ways to stay in control."
+                else -> "Your calls. Your control."
+            }
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("Your calls.", color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.Bold)
-                Text("Your network. Your control.", color = Pink, fontSize = 17.sp)
-            }
+                Text(selectedTab.uppercase(), color = Cyan, fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+                Text(pageTitle, color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+                Text(pageSubtitle, color = Pink, fontSize = 14.sp)
             }
             if (selectedTab == "Premium") {
                 Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(20.dp)) {
                     Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Text("TOMOS SIP PREMIUM", color = Cyan, fontSize = 14.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
-                        Text("One-time lifetime licence", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                        Text(if (engine.premiumLicenceActive) "PREMIUM ACTIVE • All included features unlocked" else "FREE EDITION • Scan a valid device-bound licence QR to activate", color = if (engine.premiumLicenceActive) Cyan else Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("LIFETIME PLAN", color = Cyan, fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold, letterSpacing = 1.6.sp)
+                            Spacer(Modifier.weight(1f))
+                            Surface(
+                                color = (if (engine.premiumLicenceActive) Cyan else Muted).copy(alpha = 0.12f),
+                                shape = RoundedCornerShape(50)
+                            ) {
+                                Text(if (engine.premiumLicenceActive) "ACTIVE" else "FREE EDITION",
+                                    color = if (engine.premiumLicenceActive) Cyan else Muted,
+                                    fontSize = 9.sp, fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
+                            }
+                        }
+                        Text("TomOS SIP Premium", color = Color.White, fontSize = 22.sp,
+                            fontWeight = FontWeight.Bold)
+                        Text("One-time lifetime licence", color = Muted, fontSize = 13.sp)
                         Text("Premium includes multiple SIP accounts, advanced codec controls and encrypted backups. Core SIP calling remains free.", color = Muted, fontSize = 12.sp)
                         Text(premiumMessage, color = Color.White, fontSize = 12.sp)
                         Text("OFFLINE DEVICE ACTIVATION", color = Cyan, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
@@ -1411,7 +1457,7 @@ private fun TomSipScreen(engine: TomSipEngine) {
                             modifier = Modifier.fillMaxWidth(),
                             enabled = !premiumBusy && BuildConfig.TOMOS_PREMIUM_PUBLIC_KEY.isNotBlank()
                         ) {
-                            Text("SCAN OFFLINE LICENCE QR")
+                            Text("SCAN LICENCE QR", fontWeight = FontWeight.Bold, letterSpacing = 0.4.sp)
                         }
                         Text(
                             if (BuildConfig.TOMOS_PREMIUM_PUBLIC_KEY.isBlank())
@@ -1582,16 +1628,37 @@ private fun TomSipScreen(engine: TomSipEngine) {
                 }
             }
             }
-            Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(20.dp)) {
-                Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Card(
+                modifier = Modifier.fillMaxWidth().border(
+                    1.dp, (if (engine.registered) Cyan else Pink).copy(alpha = 0.28f), RoundedCornerShape(20.dp)
+                ),
+                colors = CardDefaults.cardColors(containerColor = Panel),
+                shape = RoundedCornerShape(20.dp)
+            ) {
+                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("ACCOUNT STATUS", color = Muted, fontSize = 11.sp, letterSpacing = 1.5.sp)
+                        Text("SIP ACCOUNT", color = Muted, fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold, letterSpacing = 1.6.sp)
                         Spacer(Modifier.weight(1f))
-                        Box(Modifier.size(8.dp).background(if (engine.registered) Cyan else Pink, RoundedCornerShape(50)))
-                        Spacer(Modifier.width(7.dp))
-                        Text(if (engine.registered) "ONLINE" else "OFFLINE", color = if (engine.registered) Cyan else Pink, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Surface(
+                            color = (if (engine.registered) Cyan else Pink).copy(alpha = 0.12f),
+                            shape = RoundedCornerShape(50)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Box(Modifier.size(7.dp).background(
+                                    if (engine.registered) Cyan else Pink, RoundedCornerShape(50)
+                                ))
+                                Text(if (engine.registered) "REGISTERED" else "NOT REGISTERED",
+                                    color = if (engine.registered) Cyan else Pink,
+                                    fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp)
+                            }
+                        }
                     }
-                    Text(engine.status, color = Color.White, fontSize = 15.sp)
+                    Text(engine.status, color = Color.White, fontSize = 14.sp, lineHeight = 20.sp)
                 }
             }
             if (selectedTab == "Dialler") {
