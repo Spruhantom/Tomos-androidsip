@@ -90,52 +90,10 @@ jobs:
             adb start-server
             adb devices -l
             adb -s emulator-5554 wait-for-device
-            python3 - <<'PY'
-            import subprocess
-            import sys
-            import time
-
-            deadline = time.monotonic() + 180
-            while time.monotonic() < deadline:
-                try:
-                    result = subprocess.run(
-                        ["adb", "-s", "emulator-5554", "shell", "getprop", "sys.boot_completed"],
-                        check=False, capture_output=True, text=True, timeout=10,
-                    )
-                    if result.returncode == 0 and result.stdout.strip() == "1":
-                        print("Android emulator boot completed.", flush=True)
-                        break
-                except subprocess.TimeoutExpired:
-                    pass
-                time.sleep(3)
-            else:
-                print("Android emulator did not report sys.boot_completed=1.", file=sys.stderr)
-                raise SystemExit(1)
-            PY
-            # Bound the instrumentation run and kill its process group on timeout.
-            python3 - <<'PY'
-            import os
-            import signal
-            import subprocess
-            import sys
-
-            process = subprocess.Popen(
-                ["gradle", "--no-daemon", "--stacktrace", "--console=plain", "connectedDebugAndroidTest"],
-                start_new_session=True,
-            )
-            try:
-                exit_code = process.wait(timeout=600)
-            except subprocess.TimeoutExpired:
-                print("Android instrumentation tests exceeded the 10-minute limit.", file=sys.stderr)
-                try:
-                    os.killpg(process.pid, signal.SIGTERM)
-                    process.wait(timeout=15)
-                except subprocess.TimeoutExpired:
-                    os.killpg(process.pid, signal.SIGKILL)
-                    process.wait()
-                raise SystemExit(124)
-            raise SystemExit(exit_code)
-            PY
+            # The emulator runner executes script lines individually, so keep Python commands on one line.
+            python3 -c 'import subprocess,sys; sys.exit(subprocess.run(["adb","-s","emulator-5554","shell","getprop","sys.boot_completed"],check=True,capture_output=True,text=True,timeout=30).stdout.strip() != "1")'
+            # Bound the instrumentation run; the emulator action invokes each script line separately.
+            python3 -c 'import subprocess,sys; sys.exit(subprocess.run(["gradle","--no-daemon","--stacktrace","--console=plain","connectedDebugAndroidTest"],timeout=600).returncode)'
       - name: Collect emulator diagnostics
         if: always()
         run: |
