@@ -1072,7 +1072,7 @@ private fun TomSipScreen(engine: TomSipEngine) {
                                 ?: throw SecurityException("The saved licence could not be re-verified.")
                         }
                         premiumOfflineActive = true
-                        engine.setPremiumLicenceActive(true)
+                        engine.updatePremiumLicenceStatus(true)
                         premiumMessage = "Premium activated from QR. Your licence is verified and saved securely on this device."
                     } catch (error: Exception) {
                         premiumOfflineActive = false
@@ -1103,17 +1103,17 @@ private fun TomSipScreen(engine: TomSipEngine) {
             when (restored) {
                 true -> {
                     premiumOfflineActive = true
-                    engine.setPremiumLicenceActive(true)
+                    engine.updatePremiumLicenceStatus(true)
                     premiumMessage = "Premium active. Saved offline licence signature and installation ID verified."
                 }
                 false -> {
                     premiumOfflineActive = false
-                    engine.setPremiumLicenceActive(false)
+                    engine.updatePremiumLicenceStatus(false)
                     premiumMessage = "Saved licence signature is valid, but it is not bound to this installation. Premium remains locked."
                 }
                 null -> {
                     premiumOfflineActive = false
-                    engine.setPremiumLicenceActive(false)
+                    engine.updatePremiumLicenceStatus(false)
                     premiumMessage = "No valid saved Premium licence was found for this installation."
                 }
             }
@@ -1466,7 +1466,7 @@ private fun TomSipScreen(engine: TomSipEngine) {
                                         if (result.isSuccess) {
                                             premiumCode = ""
                                             premiumOfflineActive = true
-                                            engine.setPremiumLicenceActive(true)
+                                            engine.updatePremiumLicenceStatus(true)
                                         }
                                         premiumBusy = false
                                     }
