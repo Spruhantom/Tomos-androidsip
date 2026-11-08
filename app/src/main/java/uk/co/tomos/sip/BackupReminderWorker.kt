@@ -56,7 +56,7 @@ class BackupReminderWorker(
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val notification = NotificationCompat.Builder(applicationContext, channelId)
-            .setSmallIcon(android.R.drawable.ic_menu_save)
+            .setSmallIcon(R.drawable.ic_notification_tomos)
             .setContentTitle("Time to back up TomOS SIP")
             .setContentText("Export your contacts and call history to a safe location.")
             .setStyle(NotificationCompat.BigTextStyle().bigText(
