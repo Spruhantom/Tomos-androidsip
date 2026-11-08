@@ -173,11 +173,14 @@ class PremiumLicenceVerifierTest {
 
     @Test fun offlineVerifierRejectsTamperedSignedPayloadAndMirror() {
         val fixture = signedOfflineFixture()
-        val changedBytes = Base64.getDecoder().decode(
-            fixture.document.getString("signed_payload")
-        ).also { it[it.lastIndex] = (it.last().toInt() xor 1).toByte() }
+        val changedPayloadText = String(
+            Base64.getDecoder().decode(fixture.document.getString("signed_payload")),
+            Charsets.UTF_8
+        ).replace("security-test", "attacker-test")
+        val changedBytes = changedPayloadText.toByteArray(Charsets.UTF_8)
         val tamperedSignatureInput = JSONObject(fixture.document.toString())
             .put("signed_payload", Base64.getEncoder().encodeToString(changedBytes))
+            .put("payload", JSONObject(changedPayloadText))
         assertFalse(fixture.verifier.verifyOffline(
             tamperedSignatureInput, "123e4567-e89b-12d3-a456-426614174000"
         ))
