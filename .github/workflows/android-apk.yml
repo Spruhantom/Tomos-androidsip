@@ -62,7 +62,8 @@ jobs:
         with:
           api-level: 35
           arch: x86_64
-          profile: Pixel_2
+          profile: pixel_2
+          target: google_apis
           disable-animations: true
           script: gradle --no-daemon --stacktrace connectedDebugAndroidTest
 
