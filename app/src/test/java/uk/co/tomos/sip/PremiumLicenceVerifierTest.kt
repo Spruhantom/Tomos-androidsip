@@ -113,7 +113,7 @@ class PremiumLicenceVerifierTest {
     )
 
     private fun signedOfflineFixture(
-        mutatePayload: (JSONObject) -> Unit = {}
+        mutatePayload: JSONObject.() -> Unit = {}
     ): OfflineFixture {
         val deviceId = "123e4567-e89b-12d3-a456-426614174000"
         val payload = JSONObject()
