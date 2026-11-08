@@ -880,7 +880,7 @@ class TomSipEngine(context: android.content.Context) {
         val manager = notificationManager()
         if (Build.VERSION.SDK_INT >= 26) {
             manager.createNotificationChannel(
-                NotificationChannel("sip_status", "SIP connection", NotificationManager.IMPORTANCE_LOW).apply {
+                NotificationChannel("tomos_sip_service", "SIP connection", NotificationManager.IMPORTANCE_LOW).apply {
                     description = "Shows TomOS SIP registration and active-call status"
                     setShowBadge(false)
                 }
@@ -896,8 +896,9 @@ class TomSipEngine(context: android.content.Context) {
         }
         val detail = if (activeCall) {
             if (callStartedAtMillis > 0L) activeCallName else "Call with $activeCallName"
-        } else "Your SIP account is registered and ready for calls"
-        val notification = NotificationCompat.Builder(appContext, "sip_status")
+        } else if (registered) "Your SIP account is registered and ready for calls"
+        else "Set up or register a SIP account to make calls."
+        val notification = NotificationCompat.Builder(appContext, "tomos_sip_service")
             .setSmallIcon(R.drawable.ic_notification_tomos)
             .setContentTitle(title)
             .setContentText(detail)
