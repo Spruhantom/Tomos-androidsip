@@ -4,12 +4,24 @@ import java.util.Base64
 import org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters
 import org.bouncycastle.crypto.signers.Ed25519Signer
 import org.json.JSONObject
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.security.MessageDigest
 
 class PremiumLicenceVerifierTest {
+    @Test fun qrActivationCodeIsNormalizedAndValidated() {
+        val code = "TOMOS-PREM-ABCD-EFGH-IJKL-MNOP"
+        assertEquals(code, normalizeQrActivationCode(code))
+        assertEquals(code, normalizeQrActivationCode("  tomos-prem-abcd-efgh-ijkl-mnop  "))
+        assertNull(normalizeQrActivationCode("https://example.com/$code"))
+        assertNull(normalizeQrActivationCode(code + "!"))
+        assertNull(normalizeQrActivationCode(code.replace("-", "")))
+        assertNull(normalizeQrActivationCode("TOMOS-PREM-0000-0000-0000-0000"))
+    }
+
     @Test fun missingPublicKeyRejectsLicence() {
         assertFalse(PremiumLicenceVerifier("").verify(JSONObject(), "TOMOS-PREM-AAAA-BBBB-CCCC-DDDD"))
     }
@@ -42,9 +54,7 @@ class PremiumLicenceVerifierTest {
             .put("payload", JSONObject(canonical))
         val verifier = PremiumLicenceVerifier(publicPem)
         assertTrue(verifier.verify(document, code))
-        // A persisted licence can be re-verified after restart without retaining the activation code.
         assertTrue(verifier.verifyStored(document))
-
         val alteredMirror = JSONObject(document.toString()).apply {
             put("payload", JSONObject(canonical).put("customer_reference", "tampered"))
         }
