@@ -91,7 +91,9 @@ class PremiumLicenceVerifier(private val publicKeyPem: String) {
             "The Premium licence ID must be a canonical UUID."
         }
         require(payload.getString("activation_code_sha256").matches(Regex("[0-9a-f]{64}")))
-        Instant.parse(payload.getString("issued_at"))
+        val issuedAt = payload.getString("issued_at")
+        require(issuedAt.endsWith("Z")) { "The issue timestamp must be UTC." }
+        Instant.parse(issuedAt)
         val features = payload.getJSONArray("features")
         val received = (0 until features.length()).map { features.getString(it) }
         if (received != PREMIUM_FEATURES) return false
