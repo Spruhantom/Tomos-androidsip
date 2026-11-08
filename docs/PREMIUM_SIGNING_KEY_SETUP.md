@@ -24,7 +24,7 @@ migration with an overlap period before changing the embedded public key.
 The public key is not secret, but treat it as a release-controlled trust anchor.
 Verify its fingerprint out of band before configuring builds.
 
-## 2. Build a release with the public key
+## 2. Build an APK with the public key
 
 The Android Gradle build accepts the PEM public key from either a Gradle property
 or an environment variable. For example:
