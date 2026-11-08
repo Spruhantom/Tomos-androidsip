@@ -17,6 +17,7 @@ import java.net.URL
 import java.nio.charset.StandardCharsets
 import java.security.KeyStore
 import java.security.MessageDigest
+import java.time.Instant
 import java.util.UUID
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -66,8 +67,11 @@ class PremiumLicenceVerifier(private val publicKeyPem: String) {
     /** Verifies a serverless licence and enforces its signed installation UUID binding. */
     fun verifyOffline(document: JSONObject, deviceId: String): Boolean = runCatching {
         val normalizedDeviceId = UUID.fromString(deviceId).toString()
-        verifyDocument(document, null) &&
-            UUID.fromString(document.getJSONObject("payload").getString("device_id")).toString() == normalizedDeviceId
+        val payloadDeviceId = document.getJSONObject("payload").getString("device_id")
+        deviceId == normalizedDeviceId &&
+            UUID.fromString(payloadDeviceId).toString() == payloadDeviceId &&
+            verifyDocument(document, null) &&
+            payloadDeviceId == normalizedDeviceId
     }.getOrDefault(false)
 
     /** Re-verifies a locally stored licence after restart; the original code is not stored. */
@@ -82,9 +86,12 @@ class PremiumLicenceVerifier(private val publicKeyPem: String) {
         if (!jsonEquivalent(document.getJSONObject("payload"), payload)) return false
         if (payload.getInt("schema") != 1 || payload.getString("product") != PREMIUM_PRODUCT) return false
         if (payload.getString("licence_type") != "lifetime") return false
-        UUID.fromString(payload.getString("licence_id"))
+        val licenceId = payload.getString("licence_id")
+        require(UUID.fromString(licenceId).toString() == licenceId) {
+            "The Premium licence ID must be a canonical UUID."
+        }
         require(payload.getString("activation_code_sha256").matches(Regex("[0-9a-f]{64}")))
-        require(payload.getString("issued_at").endsWith("Z"))
+        Instant.parse(payload.getString("issued_at"))
         val features = payload.getJSONArray("features")
         val received = (0 until features.length()).map { features.getString(it) }
         if (received != PREMIUM_FEATURES) return false
@@ -104,7 +111,9 @@ class PremiumLicenceVerifier(private val publicKeyPem: String) {
         val signer = Ed25519Signer()
         signer.init(false, Ed25519PublicKeyParameters(encoded.copyOfRange(spkiPrefix.size, encoded.size), 0))
         signer.update(signedPayload, 0, signedPayload.size)
-        signer.verifySignature(Base64.getDecoder().decode(document.getString("signature")))
+        val signature = Base64.getDecoder().decode(document.getString("signature"))
+        if (signature.size != 64) return false
+        signer.verifySignature(signature)
     }.getOrDefault(false)
 }
 
