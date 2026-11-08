@@ -1069,19 +1069,9 @@ private fun TomSipScreen(engine: TomSipEngine) {
     var updateCheckKey by remember { mutableIntStateOf(0) }
     var backupMessage by remember { mutableStateOf("Create a password-protected backup before reinstalling.") }
     val premiumDeviceId = remember(context) { PremiumInstallationId.get(context) }
-    var premiumCode by remember { mutableStateOf("") }
     var premiumMessage by remember { mutableStateOf("Free edition. Import an offline lifetime licence or activate a code.") }
     var premiumBusy by remember { mutableStateOf(false) }
     var premiumOfflineActive by remember { mutableStateOf(false) }
-    val premiumQrScanner = rememberLauncherForActivityResult(ScanContract()) { result ->
-        val scannedCode = result.contents?.let(::normalizeQrActivationCode)
-        if (scannedCode != null) {
-            premiumCode = scannedCode
-            premiumMessage = "QR code recognised. Check the code and tap Activate Premium to redeem it."
-        } else if (result.contents != null) {
-            premiumMessage = "This QR code is not a valid TomOS Premium activation code."
-        }
-    }
     val offlineLicencePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             if (BuildConfig.TOMOS_PREMIUM_PUBLIC_KEY.isBlank()) {
@@ -1166,13 +1156,8 @@ private fun TomSipScreen(engine: TomSipEngine) {
                     val verifier = PremiumLicenceVerifier(BuildConfig.TOMOS_PREMIUM_PUBLIC_KEY)
                     val payload = document.optJSONObject("payload")
                     if (payload?.has("device_id") == true) {
-                        // Offline licences carry a signed installation UUID and must match it.
                         store.loadVerifiedOffline(premiumDeviceId, verifier)?.let { true }
-                    } else {
-                        // Online codes are single-device-bound by the redemption service.
-                        // Their signed licence has no device_id, so verify its signature on restart.
-                        verifier.verifyStored(document).let { valid -> if (valid) true else null }
-                    }
+                    } else null
                 }.getOrNull()
             }
             when (restored) {
@@ -1551,73 +1536,7 @@ private fun TomSipScreen(engine: TomSipEngine) {
                             color = Muted,
                             fontSize = 11.sp
                         )
-                        Divider(color = Color(0xFF34394D))
-                        Text("ONLINE ACTIVATION (OPTIONAL)", color = Cyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        OutlinedButton(
-                            onClick = {
-                                premiumQrScanner.launch(
-                                    ScanOptions()
-                                        .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
-                                        .setPrompt("Scan your TomOS Premium activation QR code")
-                                        .setBeepEnabled(false)
-                                        .setOrientationLocked(false)
-                                )
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                            enabled = !premiumBusy
-                        ) {
-                            Text("SCAN ACTIVATION QR CODE")
-                        }
-                        OutlinedTextField(
-                            value = premiumCode,
-                            onValueChange = { premiumCode = it.uppercase().take(64) },
-                            modifier = Modifier.fillMaxWidth(),
-                            label = { Text("Lifetime activation code") },
-                            singleLine = true,
-                            colors = fieldColors()
-                        )
-                        Button(
-                            onClick = {
-                                if (BuildConfig.TOMOS_PREMIUM_API_URL.isBlank() || BuildConfig.TOMOS_PREMIUM_PUBLIC_KEY.isBlank()) {
-                                    premiumMessage = "Premium activation is not configured in this build yet."
-                                } else {
-                                    premiumBusy = true
-                                    updateScope.launch {
-                                        val client = PremiumActivationClient(
-                                            endpoint = BuildConfig.TOMOS_PREMIUM_API_URL,
-                                            verifier = PremiumLicenceVerifier(BuildConfig.TOMOS_PREMIUM_PUBLIC_KEY),
-                                            installationId = { PremiumInstallationId.get(context) },
-                                            saveLicence = { licence ->
-                                                SecurePremiumLicenceStore(context).save(licence.toString())
-                                            }
-                                        )
-                                        val result = client.redeem(premiumCode)
-                                        premiumMessage = result.fold(
-                                            { "Premium lifetime licence activated and verified." },
-                                            { "Activation failed: ${it.message ?: "please try again"}" }
-                                        )
-                                        if (result.isSuccess) {
-                                            premiumCode = ""
-                                            premiumOfflineActive = true
-                                            engine.updatePremiumLicenceStatus(true)
-                                        }
-                                        premiumBusy = false
-                                    }
-                                }
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                            enabled = !premiumBusy && premiumCode.isNotBlank() &&
-                                BuildConfig.TOMOS_PREMIUM_API_URL.isNotBlank() &&
-                                BuildConfig.TOMOS_PREMIUM_PUBLIC_KEY.isNotBlank(),
-                            colors = ButtonDefaults.buttonColors(containerColor = Cyan, contentColor = Void)
-                        ) {
-                            Text(if (premiumBusy) "VERIFYING…" else "ACTIVATE PREMIUM")
-                        }
-                        Text(
-                            "Online activation requires an HTTPS licence-service URL and an internet connection. Offline file import only needs the production public key. Reinstalling or clearing app data may create a new installation ID and require a reissued licence.",
-                            color = Muted,
-                            fontSize = 11.sp
-                        )
+
                     }
                 }
             }
