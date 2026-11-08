@@ -1033,6 +1033,37 @@ private fun TomSipScreen(engine: TomSipEngine) {
             }
         }
     }
+    val offlineLicenceQrScanner = rememberLauncherForActivityResult(ScanContract()) { result ->
+        val rawPayload = result.contents
+        if (rawPayload != null) {
+            val document = parseOfflineLicenceQr(rawPayload)
+            if (document == null) {
+                premiumMessage = "This QR code does not contain a valid TomOS offline licence."
+            } else if (BuildConfig.TOMOS_PREMIUM_PUBLIC_KEY.isBlank()) {
+                premiumMessage = "Offline licence verification is not configured in this build."
+            } else {
+                premiumBusy = true
+                updateScope.launch {
+                    try {
+                        withContext(Dispatchers.IO) {
+                            val verifier = PremiumLicenceVerifier(BuildConfig.TOMOS_PREMIUM_PUBLIC_KEY)
+                            val store = SecurePremiumLicenceStore(context)
+                            store.importOffline(document, premiumDeviceId, verifier)
+                            store.loadVerifiedOffline(premiumDeviceId, verifier)
+                                ?: throw SecurityException("The saved licence could not be re-verified.")
+                        }
+                        premiumOfflineActive = true
+                        premiumMessage = "Offline QR licence imported. Signature verified, device ID matched and licence stored securely. Premium feature unlocking remains gated pending final integration tests."
+                    } catch (error: Exception) {
+                        premiumOfflineActive = false
+                        premiumMessage = "Offline QR import failed: ${error.message ?: "invalid licence"}"
+                    } finally {
+                        premiumBusy = false
+                    }
+                }
+            }
+        }
+    }
     LaunchedEffect(premiumDeviceId) {
         if (BuildConfig.TOMOS_PREMIUM_PUBLIC_KEY.isNotBlank()) {
             val restored = withContext(Dispatchers.IO) {
@@ -1338,6 +1369,21 @@ private fun TomSipScreen(engine: TomSipEngine) {
                             enabled = !premiumBusy && BuildConfig.TOMOS_PREMIUM_PUBLIC_KEY.isNotBlank()
                         ) {
                             Text(if (premiumBusy) "VERIFYING LICENCE…" else "IMPORT OFFLINE LICENCE FILE")
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                offlineLicenceQrScanner.launch(
+                                    ScanOptions()
+                                        .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+                                        .setPrompt("Scan the complete TomOS offline licence QR")
+                                        .setBeepEnabled(false)
+                                        .setOrientationLocked(false)
+                                )
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = !premiumBusy && BuildConfig.TOMOS_PREMIUM_PUBLIC_KEY.isNotBlank()
+                        ) {
+                            Text("SCAN OFFLINE LICENCE QR")
                         }
                         Text(
                             if (BuildConfig.TOMOS_PREMIUM_PUBLIC_KEY.isBlank())
