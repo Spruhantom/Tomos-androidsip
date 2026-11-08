@@ -499,7 +499,12 @@ class TomSipEngine(context: android.content.Context) {
                         callStartedAtMillis = callConnectedAtElapsedMillis
                     }
                 }
-                if (state == Call.State.Paused) activeCall = true
+                when (state) {
+                    Call.State.Paused -> { activeCall = true; held = true }
+                    Call.State.StreamsRunning, Call.State.Connected -> held = false
+                    Call.State.End, Call.State.Released, Call.State.Error -> held = false
+                    else -> Unit
+                }
                 if (state == Call.State.End || state == Call.State.Released || state == Call.State.Error) {
                     incomingCaller = null
                     notificationManager().cancel(1001)
@@ -527,7 +532,9 @@ class TomSipEngine(context: android.content.Context) {
                     Call.State.OutgoingInit, Call.State.OutgoingProgress -> "Calling…"
                     Call.State.OutgoingRinging -> "Ringing…"
                     Call.State.Connected, Call.State.StreamsRunning -> "Connected"
+                    Call.State.Pausing -> "Putting call on hold…"
                     Call.State.Paused -> "On hold"
+                    Call.State.Resuming -> "Resuming call…"
                     Call.State.End, Call.State.Released, Call.State.Error -> "Call ended"
                     else -> message
                 }
@@ -976,7 +983,54 @@ class TomSipEngine(context: android.content.Context) {
         incomingCaller = null
     }
     fun toggleMute() { muted = !muted; core.setMicEnabled(!muted) }
-    fun toggleHold() { val call = core.currentCall ?: return; if (held) call.resume() else call.pause(); held = !held }
+    fun toggleHold() {
+        val call = core.currentCall ?: run { callStatus = "No active call."; return }
+        val result = when (call.state) {
+            Call.State.Paused -> call.resume()
+            Call.State.StreamsRunning -> call.pause()
+            else -> {
+                callStatus = "Wait until the call is connected before changing hold."
+                return
+            }
+        }
+        if (result != 0) {
+            callStatus = if (call.state == Call.State.Paused) "Resume request failed. Please try again."
+            else "Hold request failed. Please try again."
+        }
+        // The call-state listener is the source of truth for [held].
+    }
+    fun sendDtmf(digit: Char): Boolean {
+        if (digit !in "0123456789*#ABCD".toSet()) return false
+        val call = core.currentCall ?: run { callStatus = "No active call."; return false }
+        if (call.state != Call.State.StreamsRunning) {
+            callStatus = "Keypad tones are available when the call is connected."
+            return false
+        }
+        val result = call.sendDtmf(digit)
+        if (result != 0) callStatus = "Unable to send keypad tone ($result)."
+        return result == 0
+    }
+    fun transfer(destination: String): String {
+        return try {
+            require(destination.isNotBlank()) { "Enter an extension or SIP address to transfer to." }
+            val call = core.currentCall ?: throw IllegalStateException("There is no active call to transfer.")
+            require(call.state == Call.State.StreamsRunning || call.state == Call.State.Paused) {
+                "The call must be connected before it can be transferred."
+            }
+            val target = if (destination.contains("@")) destination.trim() else {
+                val domain = core.defaultAccount?.params?.serverAddress?.domain
+                    ?: throw IllegalStateException("SIP server is not configured.")
+                "sip:" + destination.trim() + "@" + domain
+            }
+            val address = Factory.instance().createAddress(target)
+                ?: throw IllegalArgumentException("Invalid transfer destination.")
+            val result = call.transferTo(address)
+            if (result == 0) "Transfer request sent to $destination."
+            else "Transfer failed (Linphone error $result)."
+        } catch (error: Exception) {
+            error.message ?: "Unable to transfer this call."
+        }.also { callStatus = it }
+    }
     fun toggleSpeaker() { speaker = !speaker; val target = if (speaker) AudioDevice.Type.Speaker else AudioDevice.Type.Earpiece; core.setOutputAudioDevice(core.audioDevices.firstOrNull { it.type == target }) }
     fun hangup() { core.currentCall?.terminate(); callStatus = "Call ended" }
     fun shutdown() {
@@ -1949,15 +2003,21 @@ private fun TomSipScreen(engine: TomSipEngine) {
 @Composable
 private fun ActiveCallScreen(engine: TomSipEngine, elapsedSeconds: Int, modifier: Modifier = Modifier) {
     val isIncoming = engine.incomingCaller != null
+    var showDialpad by remember { mutableStateOf(false) }
+    var showTransfer by remember { mutableStateOf(false) }
+    var dialledDigits by remember { mutableStateOf("") }
+    var transferDestination by remember { mutableStateOf("") }
+    var transferMessage by remember { mutableStateOf("") }
     val callPulse = rememberInfiniteTransition(label = "active-call-pulse")
         .animateFloat(initialValue = 1f, targetValue = 1.045f,
             animationSpec = infiniteRepeatable(tween(1100), repeatMode = RepeatMode.Reverse),
             label = "active-call-avatar-scale")
     Column(
         modifier.background(Brush.verticalGradient(listOf(Void, Color(0xFF111326))))
+            .verticalScroll(rememberScrollState())
             .padding(horizontal = 24.dp, vertical = 28.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.SpaceBetween
+        verticalArrangement = Arrangement.spacedBy(22.dp)
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("TOMOS SIP", color = Cyan, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 3.sp)
@@ -1988,11 +2048,70 @@ private fun ActiveCallScreen(engine: TomSipEngine, elapsedSeconds: Int, modifier
                 }
             }
         } else {
-            Column(verticalArrangement = Arrangement.spacedBy(22.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                     CallControl("MUTE", engine.muted, "🎙") { engine.toggleMute() }
                     CallControl("SPEAKER", engine.speaker, "🔊") { engine.toggleSpeaker() }
                     CallControl(if (engine.held) "RESUME" else "HOLD", engine.held, "Ⅱ") { engine.toggleHold() }
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedButton(
+                        onClick = { showDialpad = !showDialpad; if (showDialpad) showTransfer = false },
+                        modifier = Modifier.weight(1f).height(48.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Cyan)
+                    ) { Text(if (showDialpad) "HIDE KEYPAD" else "KEYPAD") }
+                    OutlinedButton(
+                        onClick = { showTransfer = !showTransfer; if (showTransfer) showDialpad = false },
+                        modifier = Modifier.weight(1f).height(48.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Cyan)
+                    ) { Text(if (showTransfer) "CLOSE TRANSFER" else "TRANSFER") }
+                }
+                if (showDialpad) {
+                    Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(18.dp)) {
+                        Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("IN-CALL KEYPAD", color = Cyan, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
+                            Text(dialledDigits.ifBlank { "Enter digits to send DTMF tones" }, color = Color.White, fontSize = 18.sp)
+                            listOf(listOf("1", "2", "3"), listOf("4", "5", "6"), listOf("7", "8", "9"), listOf("*", "0", "#")).forEach { keys ->
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    keys.forEach { key ->
+                                        OutlinedButton(
+                                            onClick = { if (engine.sendDtmf(key.single())) dialledDigits += key },
+                                            modifier = Modifier.weight(1f).height(48.dp),
+                                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                                            shape = RoundedCornerShape(12.dp)
+                                        ) { Text(key, fontSize = 20.sp, fontWeight = FontWeight.SemiBold) }
+                                    }
+                                }
+                            }
+                            TextButton(onClick = { dialledDigits = "" }) { Text("CLEAR DISPLAY", color = Pink) }
+                        }
+                    }
+                }
+                if (showTransfer) {
+                    Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(18.dp)) {
+                        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text("BLIND CALL TRANSFER", color = Cyan, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
+                            Text("Send the caller to an extension or SIP address.", color = Muted, fontSize = 12.sp)
+                            OutlinedTextField(
+                                value = transferDestination,
+                                onValueChange = { transferDestination = it; transferMessage = "" },
+                                modifier = Modifier.fillMaxWidth(),
+                                label = { Text("Extension or SIP address") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                                colors = fieldColors()
+                            )
+                            if (transferMessage.isNotBlank()) {
+                                Text(transferMessage, color = if (transferMessage.startsWith("Transfer request sent")) Cyan else Pink, fontSize = 12.sp)
+                            }
+                            Button(
+                                onClick = { transferMessage = engine.transfer(transferDestination) },
+                                modifier = Modifier.fillMaxWidth().height(50.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Cyan, contentColor = Void),
+                                shape = RoundedCornerShape(14.dp)
+                            ) { Text("TRANSFER CALL", fontWeight = FontWeight.Bold) }
+                        }
+                    }
                 }
                 Button(onClick = { engine.hangup() }, Modifier.fillMaxWidth(0.72f).height(64.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Pink), shape = RoundedCornerShape(22.dp)) {
