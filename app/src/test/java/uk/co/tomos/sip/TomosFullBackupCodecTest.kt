@@ -44,27 +44,30 @@ class TomosFullBackupCodecTest {
     }
 
     @Test fun rejectsCredentialsForUnknownAccounts() {
-        val json = TomosFullBackupCodec.encode(
-            listOf(contact), listOf(call), listOf(account), mapOf("other-account" to "secret"),
-            account.id, emptySet(), false
-        )
-        assertThrows(IllegalArgumentException::class.java) { TomosFullBackupCodec.decode(json) }
+        assertThrows(IllegalArgumentException::class.java) {
+            TomosFullBackupCodec.encode(
+                listOf(contact), listOf(call), listOf(account), mapOf("other-account" to "secret"),
+                account.id, emptySet(), false
+            )
+        }
     }
 
     @Test fun rejectsUnknownSelectedAccount() {
-        val json = TomosFullBackupCodec.encode(
-            listOf(contact), listOf(call), listOf(account), emptyMap(),
-            "missing-account", emptySet(), false
-        )
-        assertThrows(IllegalArgumentException::class.java) { TomosFullBackupCodec.decode(json) }
+        assertThrows(IllegalArgumentException::class.java) {
+            TomosFullBackupCodec.encode(
+                listOf(contact), listOf(call), listOf(account), emptyMap(),
+                "missing-account", emptySet(), false
+            )
+        }
     }
 
     @Test fun rejectsDuplicateAccountIds() {
-        val json = TomosFullBackupCodec.encode(
-            listOf(contact), listOf(call), listOf(account, account), emptyMap(),
-            account.id, emptySet(), false
-        )
-        assertThrows(IllegalArgumentException::class.java) { TomosFullBackupCodec.decode(json) }
+        assertThrows(IllegalArgumentException::class.java) {
+            TomosFullBackupCodec.encode(
+                listOf(contact), listOf(call), listOf(account, account), emptyMap(),
+                account.id, emptySet(), false
+            )
+        }
     }
 
     @Test fun rejectsUnsupportedSchemaVersion() {
