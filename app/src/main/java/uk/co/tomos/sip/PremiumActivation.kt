@@ -5,15 +5,10 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import java.util.Base64
 import java.util.Locale
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import org.bouncycastle.crypto.params.Ed25519PublicKeyParameters
 import org.bouncycastle.crypto.signers.Ed25519Signer
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.OutputStreamWriter
-import java.net.HttpURLConnection
-import java.net.URL
 import java.nio.charset.StandardCharsets
 import java.security.KeyStore
 import java.security.MessageDigest
@@ -26,7 +21,7 @@ import javax.crypto.spec.GCMParameterSpec
 private const val PREMIUM_PRODUCT = "tomos-sip"
 private val PREMIUM_FEATURES = listOf("multiple_sip_accounts", "advanced_codec_controls", "encrypted_backup")
 
-/** Accept only a raw TomOS activation code from a QR payload; reject URLs and arbitrary text. */
+/** Strictly normalise an activation-code string for compatibility tests only. */
 internal fun normalizeQrActivationCode(value: String): String? {
     val normalized = value.filterNot(Char::isWhitespace).uppercase(Locale.ROOT)
     return normalized.takeIf { it.matches(Regex("TOMOS-PREM-(?:[A-Z2-7]{4}-){3}[A-Z2-7]{4}")) }
@@ -129,49 +124,6 @@ object PremiumInstallationId {
             }
         }
     }
-}
-
-/** Redeems an activation code over HTTPS and verifies the returned signed licence. */
-class PremiumActivationClient(
-    private val endpoint: String,
-    private val verifier: PremiumLicenceVerifier,
-    private val installationId: () -> String,
-    private val saveLicence: (JSONObject) -> Unit,
-    private val openConnection: (URL) -> HttpURLConnection = {
-        it.openConnection() as HttpURLConnection
-    }
-) {
-    suspend fun redeem(code: String): Result<JSONObject> = withContext(Dispatchers.IO) {
-        runCatching {
-            require(endpoint.startsWith("https://")) { "Premium activation requires an HTTPS endpoint." }
-            val normalizedCode = normalizeQrActivationCode(code)
-                ?: throw IllegalArgumentException("Activation code format is invalid.")
-            val deviceId = installationId()
-            val connection = openConnection(URL(endpoint.trimEnd('/') + "/v1/redeem"))
-            try {
-                connection.connectTimeout = 10_000
-                connection.readTimeout = 15_000
-                connection.requestMethod = "POST"
-                connection.doOutput = true
-                connection.setRequestProperty("Content-Type", "application/json")
-                connection.setRequestProperty("Accept", "application/json")
-                val body = JSONObject().put("activation_code", normalizedCode).put("device_id", deviceId)
-                OutputStreamWriter(connection.outputStream, StandardCharsets.UTF_8).use { it.write(body.toString()) }
-                val responseCode = connection.responseCode
-                val stream = if (responseCode in 200..299) connection.inputStream else connection.errorStream
-                val responseText = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
-                if (responseCode !in 200..299) {
-                    val message = runCatching { JSONObject(responseText).optString("detail") }.getOrNull()
-                    throw IllegalStateException(message?.takeIf { it.isNotBlank() } ?: "Activation failed (HTTP $responseCode).")
-                }
-                val licence = JSONObject(responseText).getJSONObject("licence")
-                if (!verifier.verify(licence, normalizedCode)) throw SecurityException("The returned Premium licence could not be verified.")
-                saveLicence(licence)
-                licence
-            } finally { connection.disconnect() }
-        }
-    }
-
 }
 
 /** Stores the signed licence encrypted with an Android Keystore AES-GCM key. */

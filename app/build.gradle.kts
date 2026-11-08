@@ -6,10 +6,6 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
-val premiumApiUrl = providers.gradleProperty("tomosPremiumApiUrl")
-    .orElse(providers.environmentVariable("TOMOS_PREMIUM_API_URL"))
-    .orElse("")
-    .get()
 val premiumPublicKey = providers.gradleProperty("tomosPremiumPublicKey")
     .orElse(providers.environmentVariable("TOMOS_PREMIUM_PUBLIC_KEY"))
     .orElse("")
@@ -25,7 +21,6 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        buildConfigField("String", "TOMOS_PREMIUM_API_URL", "\"$premiumApiUrl\"")
         buildConfigField("String", "TOMOS_PREMIUM_PUBLIC_KEY", "\"$escapedPremiumPublicKey\"")
         applicationId = "uk.co.tomos.sip"
         minSdk = 26
