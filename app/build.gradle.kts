@@ -22,6 +22,7 @@ android {
 
     defaultConfig {
         buildConfigField("String", "TOMOS_PREMIUM_PUBLIC_KEY", "\"$escapedPremiumPublicKey\"")
+        buildConfigField("boolean", "PREMIUM_TESTING_ENABLED", "false")
         applicationId = "uk.co.tomos.sip"
         minSdk = 26
         targetSdk = 35
@@ -31,8 +32,15 @@ android {
     }
 
     buildTypes {
-        getByName("debug")
-        getByName("release") { isMinifyEnabled = false }
+        getByName("debug") {
+            // Enables the test path only; a valid signed device-bound licence is
+            // still mandatory in PremiumFeatureGate.
+            buildConfigField("boolean", "PREMIUM_TESTING_ENABLED", "true")
+        }
+        getByName("release") {
+            isMinifyEnabled = false
+            buildConfigField("boolean", "PREMIUM_TESTING_ENABLED", "false")
+        }
     }
 
     compileOptions {
