@@ -44,7 +44,7 @@ jobs:
     name: Test Premium licence persistence on Android
     # GitHub-hosted Linux runners do not expose usable KVM to this job.
     # macOS provides native hardware acceleration for the Android emulator.
-    runs-on: macos-15
+    runs-on: macos-15-intel
     timeout-minutes: 30
     steps:
       - name: Check out source
@@ -61,6 +61,7 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
       - name: Record emulator host diagnostics
+        continue-on-error: true
         run: |
           uname -a || true
           sw_vers || true
@@ -78,6 +79,7 @@ jobs:
           target: google_apis
           disable-animations: true
           emulator-boot-timeout: 600
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
           script: |
             mkdir -p app/build/reports/androidTests/connected
             trap 'adb logcat -d > app/build/reports/androidTests/connected/emulator-logcat.txt 2>&1 || true' EXIT
