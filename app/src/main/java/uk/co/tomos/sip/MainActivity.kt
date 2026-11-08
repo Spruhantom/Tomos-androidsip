@@ -259,9 +259,17 @@ class TomSipEngine(context: android.content.Context) {
     var premiumLicenceActive by mutableStateOf(false)
         private set
 
-    fun updatePremiumLicenceStatus(active: Boolean) {
-        premiumLicenceActive = active
-        if (!active) codecStatus = "Advanced codec controls require an active Premium licence."
+    fun updatePremiumLicenceStatus(licenceVerified: Boolean) {
+        // The test-track switch is an additional gate, never a substitute for
+        // successful offline signature and installation-ID verification.
+        premiumLicenceActive = licenceVerified && BuildConfig.PREMIUM_TESTING_ENABLED
+        if (!premiumLicenceActive) {
+            codecStatus = if (licenceVerified) {
+                "Premium licence verified, but Premium testing is disabled in this build."
+            } else {
+                "Advanced codec controls require an active Premium licence."
+            }
+        }
     }
     private val prefs = context.getSharedPreferences("tomos_sip", 0)
     private val profileStore = SipAccountProfileStore(context)
