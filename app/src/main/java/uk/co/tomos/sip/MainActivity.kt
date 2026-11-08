@@ -27,6 +27,20 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.animateContentSize
+import androidx.compose.ui.draw.scale
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -1315,7 +1329,7 @@ private fun TomSipScreen(engine: TomSipEngine) {
                             NavigationBarItem(
                                 selected = selectedTab == tab,
                                 onClick = { selectedTab = tab },
-                                icon = { Text(tabSymbols[tab] ?: "•", fontSize = 19.sp) },
+                                icon = { val iconScale by animateFloatAsState(targetValue = if (selectedTab == tab) 1.12f else 1f, animationSpec = tween(180), label = "navigation-icon-scale"); Text(tabSymbols[tab] ?: "•", modifier = Modifier.scale(iconScale), fontSize = 19.sp) },
                                 label = { Text(tab) },
                                 colors = NavigationBarItemDefaults.colors(
                                     selectedIconColor = Cyan, selectedTextColor = Cyan,
@@ -1335,7 +1349,7 @@ private fun TomSipScreen(engine: TomSipEngine) {
                         NavigationRailItem(
                             selected = selectedTab == tab,
                             onClick = { selectedTab = tab },
-                            icon = { Text(tabSymbols[tab] ?: "•", fontSize = 19.sp) },
+                            icon = { val iconScale by animateFloatAsState(targetValue = if (selectedTab == tab) 1.12f else 1f, animationSpec = tween(180), label = "navigation-icon-scale"); Text(tabSymbols[tab] ?: "•", modifier = Modifier.scale(iconScale), fontSize = 19.sp) },
                             label = { Text(tab) },
                             alwaysShowLabel = true,
                             colors = NavigationRailItemDefaults.colors(
@@ -1353,6 +1367,7 @@ private fun TomSipScreen(engine: TomSipEngine) {
         } else Column(
             Modifier.fillMaxWidth().widthIn(max = 1000.dp).align(Alignment.TopCenter)
                 .background(Brush.verticalGradient(listOf(Color(0xFF111426), Void, Color(0xFF090A12))))
+                .animateContentSize(animationSpec = tween(220))
                 .verticalScroll(rememberScrollState()).padding(if (isExpandedLayout) 28.dp else 22.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
@@ -1383,27 +1398,35 @@ private fun TomSipScreen(engine: TomSipEngine) {
                         fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp))
                 }
             }
-            val pageTitle = when (selectedTab) {
-                "Dialler" -> "Make a call"
-                "Contacts" -> "Your contacts"
-                "History" -> "Call history"
-                "Settings" -> "App settings"
-                "Premium" -> "TomOS SIP Premium"
-                else -> "TomOS SIP"
-            }
-            val pageSubtitle = when (selectedTab) {
-                "Dialler" -> "Your network. Your control."
-                "Contacts" -> "Keep the people you call close at hand."
-                "History" -> "Review your recent conversations."
-                "Settings" -> "Manage updates, accounts and preferences."
-                "Premium" -> "One lifetime licence. More ways to stay in control."
-                else -> "Your calls. Your control."
-            }
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(selectedTab.uppercase(), color = Cyan, fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
-                Text(pageTitle, color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-                Text(pageSubtitle, color = Pink, fontSize = 14.sp)
+            AnimatedContent(
+                targetState = selectedTab,
+                transitionSpec = {
+                    (fadeIn(tween(220)) + slideInVertically(tween(220)) { it / 8 }) togetherWith
+                        (fadeOut(tween(130)) + slideOutVertically(tween(130)) { -it / 12 })
+                },
+                label = "page-heading-transition"
+            ) { tab ->
+                val pageTitle = when (tab) {
+                    "Dialler" -> "Make a call"
+                    "Contacts" -> "Your contacts"
+                    "History" -> "Call history"
+                    "Settings" -> "App settings"
+                    "Premium" -> "TomOS SIP Premium"
+                    else -> "TomOS SIP"
+                }
+                val pageSubtitle = when (tab) {
+                    "Dialler" -> "Your network. Your control."
+                    "Contacts" -> "Keep the people you call close at hand."
+                    "History" -> "Review your recent conversations."
+                    "Settings" -> "Manage updates, accounts and preferences."
+                    "Premium" -> "One lifetime licence. More ways to stay in control."
+                    else -> "Your calls. Your control."
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(tab.uppercase(), color = Cyan, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+                    Text(pageTitle, color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+                    Text(pageSubtitle, color = Pink, fontSize = 14.sp)
+                }
             }
             if (selectedTab == "Premium") {
                 Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(20.dp)) {
@@ -1926,6 +1949,10 @@ private fun TomSipScreen(engine: TomSipEngine) {
 @Composable
 private fun ActiveCallScreen(engine: TomSipEngine, elapsedSeconds: Int, modifier: Modifier = Modifier) {
     val isIncoming = engine.incomingCaller != null
+    val callPulse = rememberInfiniteTransition(label = "active-call-pulse")
+        .animateFloat(initialValue = 1f, targetValue = 1.045f,
+            animationSpec = infiniteRepeatable(tween(1100), repeatMode = RepeatMode.Reverse),
+            label = "active-call-avatar-scale")
     Column(
         modifier.background(Brush.verticalGradient(listOf(Void, Color(0xFF111326))))
             .padding(horizontal = 24.dp, vertical = 28.dp),
@@ -1935,7 +1962,7 @@ private fun ActiveCallScreen(engine: TomSipEngine, elapsedSeconds: Int, modifier
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("TOMOS SIP", color = Cyan, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 3.sp)
             Spacer(Modifier.height(24.dp))
-            Box(Modifier.size(112.dp).background(Panel, RoundedCornerShape(56.dp))
+            Box(Modifier.size(112.dp).scale(callPulse).background(Panel, RoundedCornerShape(56.dp))
                 .border(2.dp, Cyan.copy(alpha = 0.65f), RoundedCornerShape(56.dp)), contentAlignment = Alignment.Center) {
                 Text("☎", color = Cyan, fontSize = 48.sp)
             }
