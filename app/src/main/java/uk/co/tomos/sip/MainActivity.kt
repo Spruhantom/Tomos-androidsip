@@ -1962,7 +1962,7 @@ private fun ActiveCallScreen(engine: TomSipEngine, elapsedSeconds: Int, modifier
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("TOMOS SIP", color = Cyan, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 3.sp)
             Spacer(Modifier.height(24.dp))
-            Box(Modifier.size(112.dp).scale(callPulse).background(Panel, RoundedCornerShape(56.dp))
+            Box(Modifier.size(112.dp).scale(callPulse.value).background(Panel, RoundedCornerShape(56.dp))
                 .border(2.dp, Cyan.copy(alpha = 0.65f), RoundedCornerShape(56.dp)), contentAlignment = Alignment.Center) {
                 Text("☎", color = Cyan, fontSize = 48.sp)
             }
