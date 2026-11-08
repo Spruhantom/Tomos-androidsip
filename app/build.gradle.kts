@@ -9,8 +9,8 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        buildConfigField("String", "TOMOS_PREMIUM_API_URL", "\"\${providers.gradleProperty("tomosPremiumApiUrl").orElse("").get()}\"")
-        buildConfigField("String", "TOMOS_PREMIUM_PUBLIC_KEY", "\"\${providers.gradleProperty("tomosPremiumPublicKey").orElse("").get()}\"")
+        buildConfigField("String", "TOMOS_PREMIUM_API_URL", "\"${providers.gradleProperty("tomosPremiumApiUrl").orElse("").get()}\"")
+        buildConfigField("String", "TOMOS_PREMIUM_PUBLIC_KEY", "\"${providers.gradleProperty("tomosPremiumPublicKey").orElse("").get()}\"")
         applicationId = "uk.co.tomos.sip"
         minSdk = 26
         targetSdk = 35
