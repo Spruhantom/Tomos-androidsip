@@ -42,6 +42,10 @@ Accepts an email address and password over HTTPS and returns an account ID, shor
 
 Accepts the current refresh token and returns a new access token and rotated refresh token. The previous refresh token must be invalidated by the service after successful rotation.
 
+### `POST /v1/auth/logout`
+
+Accepts the current refresh token and revokes its token family. The Android client clears local credentials even if this endpoint is unavailable.
+
 ### `GET /v1/me/entitlements`
 
 Requires an account access token. Returns a signed envelope:
@@ -91,7 +95,7 @@ Creates a hosted checkout session for a selected plan. The response contains a s
 
 ### `POST /v1/billing/restore`
 
-Reconciles purchases already associated with the authenticated account. The client must not submit another account's credentials or raw payment details.
+Reconciles purchases already associated with the authenticated account and the selected distribution providers. The client calls this endpoint only when the user explicitly selects Restore Purchases, then fetches a fresh signed entitlement snapshot. The client must not submit another account's credentials or raw payment details.
 
 ### `POST /v1/billing/cancel`
 
