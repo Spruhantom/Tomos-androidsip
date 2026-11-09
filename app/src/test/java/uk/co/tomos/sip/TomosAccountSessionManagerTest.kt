@@ -135,8 +135,8 @@ class TomosAccountSessionManagerTest {
             session = accountTestSession("account-1", 9_000_000L)
             envelope = SignedEntitlementEnvelope("""{"signed":"test"}""")
         }
-        val result = runCatching { manager(api, store).signOut() }
-        assertTrue(result.isFailure)
+        val result = manager(api, store).signOut()
+        assertFalse(result)
         assertEquals(1, api.revokeCount)
         assertTrue(store.cleared)
         assertFalse(store.session != null)
