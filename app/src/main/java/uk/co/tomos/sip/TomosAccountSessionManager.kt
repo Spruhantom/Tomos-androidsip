@@ -47,7 +47,21 @@ class TomosAccountSessionManager(
 
     /** Restores access on a second device after the user signs into the same account. */
     @Synchronized
-    fun restorePurchases(): EntitlementSnapshot = refreshEntitlement()
+    fun restorePurchases(): EntitlementSnapshot {
+        val current = store.loadSession() ?: return EntitlementSnapshot.FREE
+        val usable = try {
+            if (current.isAccessTokenUsable(nowEpochMillis())) current
+            else api.refreshSession(current.refreshToken).also(store::saveSession)
+        } catch (_: Exception) {
+            return cachedOrFree(current.accountId)
+        }
+        return try {
+            api.restorePurchases(usable)
+            refreshEntitlement()
+        } catch (_: Exception) {
+            cachedOrFree(usable.accountId)
+        }
+    }
 
     @Synchronized
     fun signOut() {
