@@ -14,7 +14,8 @@ class TomosPluginManifestParserTest {
         capabilities: List<String> = listOf("call.events.read.basic"),
         pluginId: String = "uk.co.tomos.plugin.sample",
         artifactSha: String = "a".repeat(64),
-        signerSha: String = "b".repeat(64)
+        signerSha: String = "b".repeat(64),
+        minHostVersion: Int = 1
     ) = JSONObject()
         .put("plugin_id", pluginId)
         .put("display_name", "Sample plugin")
@@ -22,7 +23,7 @@ class TomosPluginManifestParserTest {
         .put("version", "1.2.3")
         .put("api_min", apiMin)
         .put("api_max", apiMax)
-        .put("min_host_version", 1)
+        .put("min_host_version", minHostVersion)
         .put("service_component", "uk.co.tomos.sample.SamplePluginService")
         .put("capabilities", JSONArray(capabilities))
         .put("artifact_sha256", artifactSha)
@@ -52,7 +53,7 @@ class TomosPluginManifestParserTest {
             TomosPluginManifestParser.parse(manifest(apiMin = 2, apiMax = 3))
         }.isFailure)
         assertTrue(runCatching {
-            TomosPluginManifestParser.parse(manifest(), hostVersionCode = 0)
+            TomosPluginManifestParser.parse(manifest(minHostVersion = 2), hostVersionCode = 1)
         }.isFailure)
     }
 
