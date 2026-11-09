@@ -30,13 +30,15 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
       - name: Run Android unit tests
-        run: gradle --no-daemon --stacktrace testDebugUnitTest
+        run: gradle --no-daemon --stacktrace testDebugUnitTest :plugin-api:testDebugUnitTest
       - name: Upload unit-test reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: TomOS-SIP-Unit-Test-Reports
-          path: app/build/reports/tests/testDebugUnitTest/
+          path: |
+            app/build/reports/tests/testDebugUnitTest/
+            plugin-api/build/reports/tests/testDebugUnitTest/
           if-no-files-found: warn
           retention-days: 14
 
