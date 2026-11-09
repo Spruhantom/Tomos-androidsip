@@ -29,16 +29,25 @@ data class TomosAccountSession(
         nowEpochMillis + safetyWindowMillis < accessTokenExpiresAtEpochMillis
 }
 
+/** Storage boundary for account credentials and the signed entitlement cache. */
+interface TomosAccountStore {
+    fun saveSession(session: TomosAccountSession)
+    fun loadSession(): TomosAccountSession?
+    fun saveEntitlementEnvelope(envelope: SignedEntitlementEnvelope)
+    fun loadEntitlementEnvelope(): SignedEntitlementEnvelope?
+    fun clearSession()
+}
+
 /**
  * Android Keystore-backed encrypted storage for the account session and signed
  * entitlement envelope. AES-GCM authentication failures return no cached data.
  */
-class SecureTomosAccountStore(context: Context) {
+class SecureTomosAccountStore(context: Context) : TomosAccountStore {
     private val preferences = context.getSharedPreferences("tomos_account_secure_store", Context.MODE_PRIVATE)
     private val keyAlias = "tomos_account_store_aes_gcm"
 
     @Synchronized
-    fun saveSession(session: TomosAccountSession) {
+    override fun saveSession(session: TomosAccountSession) {
         val json = JSONObject()
             .put("account_id", session.accountId)
             .put("access_token", session.accessToken)
@@ -48,7 +57,7 @@ class SecureTomosAccountStore(context: Context) {
     }
 
     @Synchronized
-    fun loadSession(): TomosAccountSession? = runCatching {
+    override fun loadSession(): TomosAccountSession? = runCatching {
         val json = JSONObject(loadEncrypted(KEY_SESSION) ?: return null)
         TomosAccountSession(
             accountId = json.getString("account_id"),
@@ -59,17 +68,17 @@ class SecureTomosAccountStore(context: Context) {
     }.getOrNull()
 
     @Synchronized
-    fun saveEntitlementEnvelope(envelope: SignedEntitlementEnvelope) {
+    override fun saveEntitlementEnvelope(envelope: SignedEntitlementEnvelope) {
         require(envelope.json.toByteArray(StandardCharsets.UTF_8).size <= MAX_ENVELOPE_BYTES)
         saveEncrypted(KEY_ENTITLEMENT, envelope.json)
     }
 
     @Synchronized
-    fun loadEntitlementEnvelope(): SignedEntitlementEnvelope? =
+    override fun loadEntitlementEnvelope(): SignedEntitlementEnvelope? =
         loadEncrypted(KEY_ENTITLEMENT)?.let(::SignedEntitlementEnvelope)
 
     @Synchronized
-    fun clearSession() {
+    override fun clearSession() {
         check(preferences.edit().remove(KEY_SESSION).remove(KEY_ENTITLEMENT).commit()) {
             "Unable to clear TomOS account data."
         }
