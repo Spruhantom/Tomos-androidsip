@@ -49,8 +49,9 @@ class PluginPackageVerifier(private val packageManager: PackageManager) {
             "Installed plugin signer does not match the reviewed publisher certificate."
         }
 
-        val apkPath = info.applicationInfo?.sourceDir
-            ?: throw SecurityException("Installed plugin APK path is unavailable.")
+        val appInfo = info.applicationInfo
+            ?: throw SecurityException("Installed plugin application info is unavailable.")
+        val apkPath = appInfo.sourceDir
         val artifactDigest = FileInputStream(apkPath).use { input ->
             val digest = MessageDigest.getInstance("SHA-256")
             val buffer = ByteArray(8_192)
@@ -77,11 +78,13 @@ class PluginPackageVerifier(private val packageManager: PackageManager) {
         require(service.metaData?.containsKey(TomosPluginApi.MANIFEST_METADATA_KEY) == true) {
             "Plugin service is missing its manifest metadata declaration."
         }
-        require(service.applicationInfo.uid == info.applicationInfo.uid)
+        val serviceAppInfo = service.applicationInfo
+            ?: throw SecurityException("Plugin service application info is unavailable.")
+        require(serviceAppInfo.uid == appInfo.uid)
 
         VerifiedPluginPackage(
             packageName = packageName,
-            uid = info.applicationInfo.uid,
+            uid = appInfo.uid,
             serviceComponent = service.name,
             signingCertificateSha256 = certificateDigest,
             artifactSha256 = artifactDigest
