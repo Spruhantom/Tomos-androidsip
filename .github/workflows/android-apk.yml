@@ -2,10 +2,10 @@ name: TomOS SIP Android APK
 
 on:
   push:
-    branches: [main, "feature/**"]
+    branches: [main, premium, "feature/**"]
     tags: ["v*"]
   pull_request:
-    branches: [main]
+    branches: [main, premium]
   workflow_dispatch:
 
 concurrency:
