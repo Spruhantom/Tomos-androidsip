@@ -1,147 +1,151 @@
-# TomOS SIP Premium Feature Plan
+# TomOS SIP Free and Premium Development Plan
 
-## Goal
+## Confirmed product decisions
 
-Introduce an optional Premium tier without making the basic SIP softphone unreliable or taking away core calling features. Premium access must be explicit, testable, revocable and recoverable when a customer changes device.
+- One Android application with Free and Premium entitlements.
+- Premium is subscription-based, with monthly and yearly billing options.
+- Distribution through both Google Play and direct GitHub APK releases.
+- Users upgrade inside the installed application; Free and Premium are not separate package identities.
+- Free supports one SIP account.
+- Plugins are available to Free and Premium users, with capability tiers.
+- Plugins are discovered through the in-app official directory.
+- Community developers may submit plugins; directory publication requires review and verification.
+- Premium entitlements are associated with a TomOS account so access can be restored across supported distribution channels and devices.
 
-Product decisions confirmed on 7 November 2026: one-time lifetime purchase, direct GitHub APK distribution, purchase/activation codes, and three initial Premium features: multiple SIP accounts, advanced codec controls and encrypted backups. No features are paywalled and no payment or licence provider is configured by this change.
+## Product principles
 
-## Recommended product tiers
+- Core SIP calling, registration reliability, contacts, call history, call controls and access to personal data remain usable in Free.
+- Free is limited to one configured SIP account. Multiple accounts are Premium.
+- Do not advertise or gate a feature until its implementation, entitlement enforcement and tests are complete.
+- Subscription expiry or verification failure must never delete or corrupt user data.
+- Entitlement checks must be enforced in domain/service operations, not only by hiding UI.
+- Do not embed payment secrets, signing secrets or permanent Premium flags in the APK.
+- Keep payment providers replaceable behind a common entitlement interface.
 
-### Free — dependable SIP softphone
+## Editions
 
-Keep these available without a subscription:
+### Free
 
-- SIP registration over UDP, TCP and TLS.
 - One SIP account.
-- Dialler, outgoing and incoming calls.
-- Mute, speakerphone, hold and resume.
-- Incoming-call notifications and background registration.
+- SIP registration and calling over supported UDP, TCP and TLS transports.
+- Incoming/outgoing calls, dial pad, mute, speaker, hold/resume and incoming-call notifications.
 - Contacts and call history.
-- Essential SIP connection diagnostics and clear error messages.
-- Basic backup/export and restore, so users can retain and move their own data.
+- Essential diagnostics and network recovery.
+- Basic backup and restore.
 - Responsive phone, tablet and foldable layouts.
+- Free plugins and explicitly permitted plugin capabilities.
 
-Core calling, security transports, emergency/reliability behaviour and access to personal data should not be used as pressure points for an upgrade.
+### Premium
 
-### Premium — lifetime licence
+Includes Free, plus the first planned paid capabilities:
 
-The confirmed commercial model is a one-time lifetime purchase, activated with a purchase code. The initial Premium features are:
+- Multiple SIP accounts.
+- Advanced codec controls and per-account codec profiles.
+- Encrypted backup and restore.
+- Premium plugin capabilities and Premium-only integrations.
 
-- Multiple simultaneously configured SIP accounts (Free remains limited to one).
-- Advanced audio codec selection and per-account codec profiles.
-- Encrypted backup and restore with password protection.
+Further advanced call management, automation and diagnostics are candidates for later releases, not launch promises.
 
-Scheduled/automated backup reminders, advanced call management and diagnostics are not part of the initial Premium offer. They can be considered separately after the initial tier is stable.
+## Branch and source strategy
 
-Do not advertise features as Premium until they exist, are tested and have a defined support policy. Do not put the responsive foldable layout itself behind Premium.
+- `main`: Free production release line. It contains shared application code and the Free experience; Premium code may be present but all Premium capabilities remain entitlement-gated.
+- `premium`: Premium integration/release line. It carries Premium-specific integration and release work while sharing the same application ID, package namespace and signing identity.
+- Feature branches are used for individual changes and reviewed through pull requests.
+- Shared fixes are merged into `main` first and then forward-ported to `premium`.
+- Premium-only work must not be merged back to `main` without review.
+- Do not maintain two divergent copies of the application source or use separate application IDs.
+- CI must test both `main` and `premium`; release builds must use a stable, protected signing identity.
 
-## Entitlement design
+## Subscription and account entitlement architecture
 
-Use a central feature catalogue rather than scattering checks through Compose screens.
+A TomOS account is the cross-channel identity. A backend entitlement service is the source of truth.
 
-Suggested feature identifiers:
+- Google Play purchases are verified server-side using the supported Play purchase verification flow and processed idempotently.
+- GitHub-distributed builds use a hosted checkout/payment provider and verified payment webhooks.
+- Both purchase adapters grant the same product entitlement to the signed-in TomOS account.
+- The app retrieves a signed, time-bounded entitlement snapshot from the backend.
+- Entitlement states include loading, Free, active monthly, active yearly, grace period, expired, refunded/revoked and verification unavailable.
+- The app caches only a verifiable, time-limited entitlement snapshot for defined offline operation.
+- Account sign-in, restore purchases, subscription management and sign-out must be accessible.
+- Never trust a client-side boolean or an unverified purchase callback.
+- Keep payment card data outside the app and entitlement backend.
+- Refunds, cancellations, billing retries, grace periods, account recovery, device limits and support workflows require explicit backend rules before launch.
 
-- `multiple_sip_accounts`
-- `advanced_codec_controls`
-- `encrypted_backup`
-- `scheduled_backup_tools`
-- `advanced_call_management`
-- `support_diagnostics_export`
+## Plugin platform
 
-Suggested tiers: `FREE` and `PREMIUM`.
+- Plugins are separately installed Android applications, not downloaded DEX/JAR code executed inside TomOS SIP.
+- Plugins communicate through an explicitly versioned Android IPC contract (initial implementation should evaluate bound services with Binder/AIDL).
+- Every plugin declares identity, publisher, version, compatible API range, minimum host version and requested capabilities.
+- The host verifies package signing identity, compatibility and directory approval before enabling a plugin.
+- Users grant and revoke narrow capabilities per plugin.
+- Plugins never receive SIP passwords, account secrets or unrestricted access to the Linphone engine.
+- Call control, contact writes, backup export/import and other sensitive operations require dedicated capabilities and explicit user-facing consent.
+- Plugin failures must not crash or block SIP calling.
+- Free users can install compatible Free plugins; Premium plugins and premium capabilities require an active entitlement.
+- The official directory is community-submitted but curated: submissions undergo automated checks and human review before being marked verified/listed.
+- Directory metadata and APK downloads must be signed or integrity-checked; the app must verify package signing identity and SHA-256 before installation.
 
-The app should ask an `EntitlementRepository` whether a feature is available. UI visibility is not security: every operation that consumes a Premium capability must also enforce the entitlement in its domain/service layer.
+## Distribution and release strategy
 
-Represent entitlement state explicitly, for example:
+- Google Play and GitHub builds share application ID, versioning policy and release signing identity.
+- Google Play builds use the Play-supported billing integration and follow current Play policy.
+- GitHub builds use the direct-distribution checkout adapter; do not assume Play Billing is available in a sideloaded build.
+- Both channels must point to the same TomOS account entitlement service.
+- APK updates require stable signing continuity; do not publish production updates from ephemeral debug signing.
+- CI creates test APKs/artifacts, but production publishing requires protected signing and release approval.
+- Release notes identify the channel and supported update path.
+- Verify current Google Play billing, user-choice and external-offer requirements before enabling production checkout links in Play builds.
 
-- Loading / unknown
-- Free
-- Premium active (with expiry and source)
-- Expired
-- Offline grace period
-- Verification error
+## Milestones and acceptance criteria
 
-Never treat a missing response, parsing failure, clock change or network outage as proof of Premium. Fail safely to Free while preserving all user data and core calling.
+### 0. Architecture foundation
+- [x] Confirm product, pricing, channel and plugin decisions.
+- [x] Create `premium` branch from current `main`.
+- [ ] Merge reviewed architecture documentation.
+- [ ] Define branch protection and CI matrix.
 
-## Purchase and licence architecture
+### 1. Feature entitlement foundation
+- [ ] Audit existing Premium licence code and replace lifetime/offline assumptions with account-backed subscription entitlements.
+- [ ] Define typed feature catalogue and entitlement states.
+- [ ] Add domain-level guards for multiple accounts, advanced codecs and encrypted backups.
+- [ ] Add tests for Free, active monthly/yearly, grace, expiry, refund/revocation, offline and verification failures.
+- [ ] Verify Free remains fully usable and preserves all user data.
 
-The current app is distributed as debug-signed APKs through GitHub Releases, not through Google Play. The repository currently has no billing SDK, account system, purchase backend or licence verification service.
+### 2. Account and subscription backend
+- [ ] Define TomOS account identity and secure sign-in/session lifecycle.
+- [ ] Define backend entitlement API and signed response format.
+- [ ] Implement Google Play purchase verification adapter.
+- [ ] Implement GitHub/direct checkout and payment webhook adapter.
+- [ ] Add restore, cancellation, renewal, grace, refund and account recovery handling.
+- [ ] Complete threat modelling, privacy review and operational monitoring.
 
-For direct GitHub APK distribution, use a hosted one-time checkout plus a small licence service:
+### 3. Plugin SDK and host
+- [ ] Publish versioned Kotlin SDK and Android IPC contract.
+- [ ] Define plugin manifest and capability catalogue.
+- [ ] Implement package discovery, signature verification and compatibility checks.
+- [ ] Implement permission consent, revocation, lifecycle and failure isolation.
+- [ ] Build sample Free and Premium plugins.
+- [ ] Add automated host/plugin compatibility and security tests.
 
-1. Customer purchases a lifetime licence through hosted checkout.
-2. Payment provider sends a signed webhook to the licence backend.
-3. Backend records the non-recurring lifetime entitlement and issues a single-use activation code.
-4. App redeems the code online and receives a signed licence token; store the token securely.
-5. App periodically refreshes/revalidates the token and supports a documented offline grace period.
-6. Backend supports code redemption limits, device limits, refunds and revocation; the app returns to Free without deleting user data.
+### 4. Community directory
+- [ ] Create directory metadata schema and submission workflow.
+- [ ] Add automated static checks, signature validation and malware scanning process.
+- [ ] Add human review, publisher identity and verified/unverified status.
+- [ ] Implement in-app browse, details, install, update and uninstall flows.
+- [ ] Provide reporting, takedown and security-response procedures.
 
-A lifetime licence means no recurring renewal or expiry for a valid, non-refunded purchase. It does not mean permanent server availability; publish a clear service-continuity policy and consider a signed offline-capable licence format.
+### 5. Release readiness
+- [ ] Stable release signing and key custody.
+- [ ] CI matrix for `main` and `premium`.
+- [ ] Google Play and GitHub release pipelines.
+- [ ] Migration, restore and update tests across distribution channels.
+- [ ] Real-device SIP, audio, incoming-call and plugin isolation tests.
+- [ ] Publish user, privacy, subscription and developer documentation.
 
-Do not embed a signing secret, payment-provider secret or permanent Premium flag in the APK. Validate signed tokens and their expiry; protect activation codes against replay and rate-limit redemption. Keep payment card details out of the app and backend.
+## Current implementation status
 
-If TomOS SIP is later distributed through Google Play, in-app purchases for digital features generally need Google Play Billing unless a policy exception/program applies. Keep the purchase adapter replaceable so direct distribution and Play distribution can use different purchase providers without changing feature checks. Review current Play policy before publishing there.
+This document is an architecture baseline, not a claim that subscription billing, a TomOS account backend, the plugin runtime or the directory already exist. Existing lifetime/offline activation code and the previous single-paid-app PR must be reviewed and replaced only in dedicated, tested changes. Keep PR #37 unmerged because its product model conflicts with the confirmed Free/Premium subscription model.
 
-## Technical implementation phases
+## Important commercial dependency
 
-### Phase 0 — product decisions (confirmed)
-
-- Pricing: one-time lifetime purchase; no subscription.
-- Distribution: direct GitHub APK only.
-- Activation: purchase/activation code.
-- Initial Premium features: multiple SIP accounts, advanced codec controls and encrypted backups.
-- Still to decide: price, payment provider, device activation limit, refund policy, offline grace period and lifetime service-continuity policy.
-
-### Phase 1 — entitlement foundation (in progress; no paywall yet)
-
-- [x] Add a pure Kotlin feature catalogue for the three confirmed Premium features.
-- [x] Add an entitlement status model, lifetime/expiry evaluation and an injectable repository boundary.
-- [x] Add a safe default repository that grants Free only until a licence has been verified.
-- [x] Add unit tests for Free, lifetime Premium, expiry boundaries, unknown and verification-error states.
-- [ ] Add feature guards at domain/service boundaries after a verified activation flow is available.
-- Keep all current functionality enabled during this phase; this avoids accidentally locking out users before purchase infrastructure exists.
-
-The initial implementation is in `PremiumEntitlements.kt` with tests in `PremiumEntitlementsTest.kt`. It deliberately does not claim that a locally stored flag is a valid purchase. The current production app wiring remains Free until the signed-token verification service is implemented.
-
-### Phase 2 — premium UX
-
-- Add a Premium page showing exact benefits, current entitlement and renewal/expiry details.
-- Show a clear explanation when a locked action is selected.
-- Do not use deceptive countdowns, hidden recurring terms or fake purchase success.
-- Make restore-purchase / restore-licence available and easy to find.
-
-### Phase 3 — payments and licence service
-
-- Implement the selected payment adapter and backend.
-- Verify purchases server-side; process signed webhooks idempotently.
-- Implement activation, refresh, expiry, revocation, device management and support tooling.
-- Add privacy/security review and abuse/rate-limit controls.
-
-### Phase 4 — enable feature gates gradually
-
-Recommended order after entitlement and payment validation:
-
-1. Advanced codec controls.
-2. Encrypted backup (keep basic unencrypted export/restore available to everyone).
-3. Multiple SIP accounts (Free remains limited to one).
-
-Release behind a remotely controlled rollout/kill switch if the service architecture supports it. Never make core calling dependent on the licence server being reachable.
-
-## Acceptance criteria
-
-- A new install with no network is fully usable as Free.
-- Core SIP calling and incoming-call handling are unchanged by entitlement failures.
-- Free users cannot invoke Premium operations by bypassing or hiding UI.
-- Active Premium customers retain access during the documented offline grace period.
-- Expired/revoked Premium returns to Free without deleting accounts, contacts, call history or backups.
-- Reinstall/device replacement can restore a legitimate entitlement.
-- Purchase, renewal, cancellation, refund, expiry, revocation and clock/network edge cases have automated tests.
-- CI builds and unit tests pass before each rollout.
-
-## Decisions needed before implementation
-
-1. Should Premium be monthly/yearly subscription, one-time lifetime purchase, or both?
-2. Is the initial distribution direct GitHub APK only, or do you intend to publish on Google Play too?
-3. Should Premium activation use an email account or a purchase/activation code?
-4. Confirm the proposed Premium feature list, especially multiple SIP accounts, advanced codec controls and encrypted backup.
+The repository documents the Linphone SDK as GPLv3. Before distributing commercial Google Play or GitHub builds, complete a licence and source-distribution compliance review for the exact SDK version and all bundled dependencies. This is a release gate, not a substitute for legal advice.
