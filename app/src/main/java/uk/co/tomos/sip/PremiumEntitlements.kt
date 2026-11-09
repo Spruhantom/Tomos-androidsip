@@ -56,18 +56,20 @@ data class EntitlementSnapshot(
             PremiumFeature.ADVANCED_CODEC_CONTROLS,
             PremiumFeature.ENCRYPTED_BACKUP -> true
         }
-        if (!isPremiumFeature || !signatureVerified) return false
+        if (!isPremiumFeature || !signatureVerified || accountId.isNullOrBlank() || source == null) {
+            return false
+        }
 
         val startsAt = validFromEpochMillis ?: return false
         val expiresAt = expiresAtEpochMillis ?: return false
-        if (nowEpochMillis < startsAt) return false
+        if (plan == null || nowEpochMillis < startsAt) return false
 
         return when (status) {
-            EntitlementStatus.PREMIUM_ACTIVE ->
-                plan != null && nowEpochMillis < expiresAt
-            EntitlementStatus.GRACE_PERIOD ->
-                plan != null && nowEpochMillis < expiresAt &&
-                    graceUntilEpochMillis?.let { nowEpochMillis < it } == true
+            EntitlementStatus.PREMIUM_ACTIVE -> nowEpochMillis < expiresAt
+            EntitlementStatus.GRACE_PERIOD -> {
+                val graceUntil = graceUntilEpochMillis ?: return false
+                nowEpochMillis >= expiresAt && nowEpochMillis < graceUntil
+            }
             else -> false
         }
     }
