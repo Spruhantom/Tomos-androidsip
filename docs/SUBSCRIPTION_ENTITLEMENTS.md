@@ -83,7 +83,7 @@ The decoded signed payload has this illustrative schema:
 }
 ```
 
-The Ed25519 signature covers the exact UTF-8 bytes represented by `signed_payload`; clients must verify those bytes before parsing or trusting any field. The client checks the configured key ID, product ID, account ID, feature set, UTC timestamps and short snapshot expiry. Key rotation requires shipping a trusted key set or a separately signed key-rotation document; changing the key ID alone must never trust a new key.
+The Ed25519 signature covers the exact UTF-8 bytes represented by `signed_payload`; clients must verify those bytes before parsing or trusting any field. The client checks the configured key ID, product ID, account ID, feature set, UTC timestamps and short snapshot expiry. Active and grace-period snapshots must list the complete supported Premium feature set; Free, expired, refunded and revoked snapshots must have an empty feature list. A Free account may omit `plan` and `source`. Key rotation requires shipping a trusted key set or a separately signed key-rotation document; changing the key ID alone must never trust a new key.
 
 ### `POST /v1/billing/google-play/verify`
 
