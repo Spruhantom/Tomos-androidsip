@@ -109,7 +109,7 @@ class TomosAccountSessionManagerTest {
     fun failedNetworkRefreshUsesOnlyStillValidSignedCache() {
         val api = FakeApi().apply { failRefresh = true }
         val store = MemoryStore().apply {
-            session = session("account-1", accessExpiry = 1_000_000L)
+            session = accountTestSession("account-1", 1_000_000L)
             envelope = SignedEntitlementEnvelope("""{"signed":"test"}""")
         }
         val result = manager(api, store).refreshEntitlement()
@@ -132,7 +132,7 @@ class TomosAccountSessionManagerTest {
     fun signOutClearsLocalCredentialsEvenIfRemoteRevocationFails() {
         val api = FakeApi().apply { failRevoke = true }
         val store = MemoryStore().apply {
-            session = session("account-1", 9_000_000L)
+            session = accountTestSession("account-1", 9_000_000L)
             envelope = SignedEntitlementEnvelope("""{"signed":"test"}""")
         }
         val result = runCatching { manager(api, store).signOut() }
