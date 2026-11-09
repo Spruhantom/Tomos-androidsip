@@ -11,6 +11,7 @@ interface TomosAccountApi {
     fun signIn(email: String, password: CharArray): TomosAccountSession
     fun fetchEntitlement(session: TomosAccountSession): SignedEntitlementEnvelope
     fun refreshSession(refreshToken: String): TomosAccountSession
+    fun restorePurchases(session: TomosAccountSession)
     fun revokeSession(refreshToken: String)
 }
 
@@ -52,6 +53,15 @@ class HttpTomosAccountApi(
         } finally {
             password.fill('\u0000')
         }
+    }
+
+    override fun restorePurchases(session: TomosAccountSession) {
+        request(
+            path = "v1/billing/restore",
+            method = "POST",
+            bearerToken = session.accessToken,
+            body = "{}"
+        )
     }
 
     override fun revokeSession(refreshToken: String) {
