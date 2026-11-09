@@ -90,6 +90,7 @@ class HttpTomosAccountApi(
         try {
             connection.connectTimeout = connectTimeoutMillis
             connection.readTimeout = readTimeoutMillis
+            connection.instanceFollowRedirects = false
             connection.requestMethod = method
             connection.setRequestProperty("Accept", "application/json")
             connection.setRequestProperty("User-Agent", "TomOS-SIP-Android")
@@ -101,13 +102,24 @@ class HttpTomosAccountApi(
             }
             val status = connection.responseCode
             val stream = if (status in 200..299) connection.inputStream else connection.errorStream
-            val response = stream?.bufferedReader(StandardCharsets.UTF_8)?.use { it.readText() }.orEmpty()
             if (status !in 200..299) {
                 // Do not include response bodies: providers may echo sensitive identifiers.
                 throw IOException("TomOS account service returned HTTP $status.")
             }
-            require(response.toByteArray(StandardCharsets.UTF_8).size <= MAX_RESPONSE_BYTES)
-            return response
+            val input = stream ?: throw IOException("TomOS account service returned an empty response.")
+            val output = java.io.ByteArrayOutputStream()
+            input.use {
+                val buffer = ByteArray(4_096)
+                while (true) {
+                    val count = it.read(buffer)
+                    if (count < 0) break
+                    if (output.size() + count > MAX_RESPONSE_BYTES) {
+                        throw IOException("TomOS account service response exceeded the size limit.")
+                    }
+                    output.write(buffer, 0, count)
+                }
+            }
+            return output.toString("UTF-8")
         } finally {
             connection.disconnect()
         }
