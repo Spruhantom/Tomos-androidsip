@@ -8,6 +8,7 @@ import org.json.JSONObject
 
 /** Narrow API boundary so tests and future account providers can be injected. */
 interface TomosAccountApi {
+    fun signIn(email: String, password: CharArray): TomosAccountSession
     fun fetchEntitlement(session: TomosAccountSession): SignedEntitlementEnvelope
     fun refreshSession(refreshToken: String): TomosAccountSession
 }
@@ -28,6 +29,29 @@ class HttpTomosAccountApi(
         require(baseUrl.endsWith("/"))
         require(connectTimeoutMillis in 1_000..60_000)
         require(readTimeoutMillis in 1_000..60_000)
+    }
+
+    override fun signIn(email: String, password: CharArray): TomosAccountSession {
+        require(email.isNotBlank() && password.isNotEmpty())
+        val passwordValue = String(password)
+        return try {
+            val response = JSONObject(
+                request(
+                    path = "v1/auth/login",
+                    method = "POST",
+                    body = JSONObject().put("email", email.trim()).put("password", passwordValue).toString()
+                )
+            )
+            TomosAccountSession(
+                accountId = response.getString("account_id"),
+                accessToken = response.getString("access_token"),
+                refreshToken = response.getString("refresh_token"),
+                accessTokenExpiresAtEpochMillis = response.getLong("access_token_expires_at")
+            )
+        } finally {
+            passwordValue.toCharArray().fill('\\u0000')
+            password.fill('\\u0000')
+        }
     }
 
     override fun fetchEntitlement(session: TomosAccountSession): SignedEntitlementEnvelope {
