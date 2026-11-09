@@ -139,7 +139,7 @@ class SignedEntitlementVerifierTest {
             signedEnvelope(
                 status = "grace_period",
                 expiresAt = "2026-11-09T15:00:00Z",
-                validUntil = "2026-11-09T13:30:00Z",
+                validUntil = "2026-11-09T14:30:00Z",
                 graceUntil = "2026-11-09T16:00:00Z"
             ),
             "account-123",
