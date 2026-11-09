@@ -34,8 +34,8 @@ class TomosAccountSessionManagerTest {
     }
 
     private class FakeApi : TomosAccountApi {
-        var signedInSession = session("account-1", 9_000_000L)
-        var refreshedSession = session("account-1", 9_000_000L)
+        var signedInSession = accountTestSession("account-1", 9_000_000L)
+        var refreshedSession = accountTestSession("account-1", 9_000_000L)
         var entitlement = SignedEntitlementEnvelope("""{"signed":"test"}""")
         var fetchCount = 0
         var refreshCount = 0
@@ -95,7 +95,7 @@ class TomosAccountSessionManagerTest {
     fun restoreRefreshesExpiredAccessTokenBeforeFetchingEntitlement() {
         val api = FakeApi()
         val store = MemoryStore().apply {
-            session = session("account-1", accessExpiry = 1_000_000L)
+            session = accountTestSession("account-1", 1_000_000L)
         }
         val result = manager(api, store).restorePurchases()
         assertEquals(1, api.refreshCount)
@@ -121,7 +121,7 @@ class TomosAccountSessionManagerTest {
     fun accountMismatchInCachedEnvelopeFallsBackToFree() {
         val api = FakeApi()
         val store = MemoryStore().apply {
-            session = session("different-account", accessExpiry = 1_000_000L)
+            session = accountTestSession("different-account", 1_000_000L)
             envelope = SignedEntitlementEnvelope("""{"signed":"test"}""")
         }
         val result = manager(api, store, activeSnapshot).current()
@@ -143,12 +143,11 @@ class TomosAccountSessionManagerTest {
         assertFalse(store.envelope != null)
     }
 
-    private companion object {
-        fun session(account: String, accessExpiry: Long) = TomosAccountSession(
-            accountId = account,
-            accessToken = "access-token",
-            refreshToken = "refresh-token",
-            accessTokenExpiresAtEpochMillis = accessExpiry
-        )
-    }
 }
+
+private fun accountTestSession(account: String, accessExpiry: Long) = TomosAccountSession(
+    accountId = account,
+    accessToken = "access-token",
+    refreshToken = "refresh-token",
+    accessTokenExpiresAtEpochMillis = accessExpiry
+)
