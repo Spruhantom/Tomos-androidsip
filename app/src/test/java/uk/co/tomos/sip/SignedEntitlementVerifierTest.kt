@@ -35,7 +35,14 @@ class SignedEntitlementVerifierTest {
         expiresAt: String = "2026-11-09T15:00:00Z",
         validFrom: String = "2026-11-01T00:00:00Z",
         validUntil: String = "2026-12-01T00:00:00Z",
-        graceUntil: String? = null
+        graceUntil: String? = null,
+        features: List<String> = listOf(
+            "multiple_sip_accounts",
+            "advanced_codec_controls",
+            "encrypted_backup",
+            "premium_plugin_capabilities"
+        ),
+        source: String = "google_play"
     ): JSONObject {
         val payload = JSONObject()
             .put("schema_version", 1)
@@ -43,18 +50,13 @@ class SignedEntitlementVerifierTest {
             .put("account_id", accountId)
             .put("status", status)
             .put("plan", plan)
-            .put("source", "google_play")
+            .put("source", source)
             .put("valid_from", validFrom)
             .put("valid_until", validUntil)
             .put("grace_until", graceUntil)
             .put("issued_at", issuedAt)
             .put("expires_at", expiresAt)
-            .put("features", org.json.JSONArray(listOf(
-                "multiple_sip_accounts",
-                "advanced_codec_controls",
-                "encrypted_backup",
-                "premium_plugin_capabilities"
-            )))
+            .put("features", org.json.JSONArray(features))
         val bytes = payload.toString().toByteArray(StandardCharsets.UTF_8)
         val signer = Ed25519Signer()
         signer.init(true, privateKey)
@@ -114,6 +116,21 @@ class SignedEntitlementVerifierTest {
         incomplete.put("signed_payload", Base64.getEncoder().encodeToString(bytes))
         incomplete.put("signature", Base64.getEncoder().encodeToString(signer.generateSignature()))
         assertNull(verifier.verify(incomplete, "account-123", now))
+    }
+
+
+    @Test
+    fun verifiesFreeAccountWithoutPurchaseSourceOrPremiumFeatures() {
+        val payload = signedEnvelope(
+            status = "free",
+            plan = "",
+            source = "",
+            features = emptyList()
+        )
+        val snapshot = verifier.verify(payload, "account-123", now)
+        assertNotNull(snapshot)
+        assertEquals(EntitlementStatus.FREE, snapshot!!.status)
+        assertFalse(snapshot.grants(PremiumFeature.ENCRYPTED_BACKUP, now))
     }
 
     @Test
