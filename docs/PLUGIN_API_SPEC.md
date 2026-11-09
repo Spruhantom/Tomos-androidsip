@@ -1,6 +1,6 @@
 # TomOS SIP Plugin API — Initial Specification
 
-Status: architecture draft for implementation. This specification does not imply that the runtime or directory is already implemented.
+Status: SDK prototype implemented on the plugin-sdk-prototype branch. The AIDL contracts, capability catalogue, strict manifest parser and installed-package verifier exist; the full host runtime and directory are still under development.
 
 ## 1. Goals
 
@@ -132,7 +132,22 @@ Provide reporting and takedown mechanisms. Never silently replace a plugin packa
 - Permission revocation during active use.
 - Ensure plugins cannot access SIP credentials or call audio by default.
 
-## 10. First sample plugins
+## 10. Implemented SDK prototype
+
+The `:plugin-api` Android library now contains:
+
+- Versioned AIDL interfaces for the plugin service, host callbacks and action results.
+- A stable capability identifier catalogue, including Free/Premium capability classification.
+- Strict manifest parsing for plugin identity, semantic version, API compatibility, minimum host version, service component, requested capabilities, APK digest and signer digest.
+- Unit tests for compatibility, malformed IDs/digests, unknown/duplicate capabilities and size limits.
+- A host-side installed-package verifier in the app that checks package ID, one-APK installation, signer certificate SHA-256, APK SHA-256, exported service and manifest metadata.
+- Android package visibility declaration for the plugin binding action.
+
+The verifier is a pre-bind check, not the complete trust chain. The next host milestone must implement directory-signature verification, explicit discovery and lifecycle management, Binder caller-UID checks on every callback, and per-plugin permission grants. A package must be rechecked after binding to reduce package-update/TOCTOU risk.
+
+See `plugin-api/README.md` for the developer-facing contract and example manifest.
+
+## 11. First sample plugins
 
 - Free: call-event notification plugin.
 - Free: read-only contact lookup plugin.
