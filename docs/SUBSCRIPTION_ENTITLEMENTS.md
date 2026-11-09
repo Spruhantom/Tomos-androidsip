@@ -34,9 +34,28 @@ Both adapters update the same account entitlement record. A purchase from either
 
 All endpoints use HTTPS, authenticated TomOS account sessions, bounded request/response sizes and versioned JSON schemas.
 
+### `POST /v1/auth/login`
+
+Accepts an email address and password over HTTPS and returns an account ID, short-lived access token, rotating refresh token and access-token expiry in Unix milliseconds. Passwords are never persisted by the Android client.
+
+### `POST /v1/auth/refresh`
+
+Accepts the current refresh token and returns a new access token and rotated refresh token. The previous refresh token must be invalidated by the service after successful rotation.
+
 ### `GET /v1/me/entitlements`
 
-Returns a signed entitlement snapshot:
+Requires an account access token. Returns a signed envelope:
+
+```json
+{
+  "signature_algorithm": "Ed25519",
+  "key_id": "entitlements-2026-01",
+  "signed_payload": "base64-of-exact-utf8-json-bytes",
+  "signature": "base64-ed25519-signature"
+}
+```
+
+The decoded signed payload has this illustrative schema:
 
 ```json
 {
@@ -56,13 +75,11 @@ Returns a signed entitlement snapshot:
     "premium_plugin_capabilities"
   ],
   "issued_at": "2026-11-09T14:00:00Z",
-  "expires_at": "2026-11-09T15:00:00Z",
-  "key_id": "entitlements-2026-01",
-  "signature": "base64-signature"
+  "expires_at": "2026-11-09T15:00:00Z"
 }
 ```
 
-This is an illustrative schema, not a live API response. The signature covers a canonical representation of every field except `signature`. Define canonicalisation and key rotation before implementation.
+The Ed25519 signature covers the exact UTF-8 bytes represented by `signed_payload`; clients must verify those bytes before parsing or trusting any field. The client checks the configured key ID, product ID, account ID, feature set, UTC timestamps and short snapshot expiry. Key rotation requires shipping a trusted key set or a separately signed key-rotation document; changing the key ID alone must never trust a new key.
 
 ### `POST /v1/billing/google-play/verify`
 
