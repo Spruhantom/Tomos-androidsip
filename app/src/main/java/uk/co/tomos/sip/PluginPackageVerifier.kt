@@ -89,7 +89,13 @@ class PluginPackageVerifier(private val packageManager: PackageManager) {
     }.getOrNull()
 
     private fun getPackageInfo(packageName: String): PackageInfo {
-        val flags = PackageManager.GET_SIGNING_CERTIFICATES or PackageManager.GET_META_DATA
+        val signatureFlag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            PackageManager.GET_SIGNING_CERTIFICATES
+        } else {
+            @Suppress("DEPRECATION")
+            PackageManager.GET_SIGNATURES
+        }
+        val flags = signatureFlag or PackageManager.GET_META_DATA
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             packageManager.getPackageInfo(
                 packageName,
