@@ -65,7 +65,7 @@ class SignedEntitlementVerifier(
         val source = when (payload.optString("source")) {
             "google_play" -> EntitlementSource.GOOGLE_PLAY
             "github_direct" -> EntitlementSource.GITHUB_DIRECT
-            else -> throw IllegalArgumentException("Unsupported purchase source.")
+            else -> null
         }
 
         val features = payload.getJSONArray("features")
@@ -76,7 +76,11 @@ class SignedEntitlementVerifier(
             "encrypted_backup",
             "premium_plugin_capabilities"
         )
-        require(featureIds == requiredFeatures)
+        if (status == EntitlementStatus.PREMIUM_ACTIVE || status == EntitlementStatus.GRACE_PERIOD) {
+            require(featureIds == requiredFeatures && source != null && plan != null)
+        } else {
+            require(featureIds.isEmpty())
+        }
 
         val validFrom = parseUtc(payload.getString("valid_from"))
         val validUntil = payload.optString("valid_until")
