@@ -6,8 +6,8 @@ package uk.co.tomos.sip
  */
 class TomosAccountSessionManager(
     private val api: TomosAccountApi,
-    private val store: SecureTomosAccountStore,
-    private val entitlementVerifier: SignedEntitlementVerifier,
+    private val store: TomosAccountStore,
+    private val entitlementVerifier: EntitlementEnvelopeVerifier,
     private val nowEpochMillis: () -> Long = System::currentTimeMillis
 ) : EntitlementRepository {
 
