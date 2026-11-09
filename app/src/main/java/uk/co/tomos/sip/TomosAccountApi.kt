@@ -11,6 +11,7 @@ interface TomosAccountApi {
     fun signIn(email: String, password: CharArray): TomosAccountSession
     fun fetchEntitlement(session: TomosAccountSession): SignedEntitlementEnvelope
     fun refreshSession(refreshToken: String): TomosAccountSession
+    fun revokeSession(refreshToken: String)
 }
 
 /**
@@ -49,9 +50,17 @@ class HttpTomosAccountApi(
                 accessTokenExpiresAtEpochMillis = response.getLong("access_token_expires_at")
             )
         } finally {
-            passwordValue.toCharArray().fill('\\u0000')
-            password.fill('\\u0000')
+            password.fill('\u0000')
         }
+    }
+
+    override fun revokeSession(refreshToken: String) {
+        require(refreshToken.isNotBlank())
+        request(
+            path = "v1/auth/logout",
+            method = "POST",
+            body = JSONObject().put("refresh_token", refreshToken).toString()
+        )
     }
 
     override fun fetchEntitlement(session: TomosAccountSession): SignedEntitlementEnvelope {
