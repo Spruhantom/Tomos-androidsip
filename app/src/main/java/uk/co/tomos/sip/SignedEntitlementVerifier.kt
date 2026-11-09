@@ -14,11 +14,15 @@ import org.json.JSONObject
  * `signed_payload`. The verifier never reserializes JSON before signature
  * verification, avoiding ambiguity in JSON key ordering or whitespace.
  */
+interface EntitlementEnvelopeVerifier {
+    fun verify(envelope: JSONObject, expectedAccountId: String, nowEpochMillis: Long): EntitlementSnapshot?
+}
+
 class SignedEntitlementVerifier(
     private val publicKeyPem: String,
     private val expectedKeyId: String
-) {
-    fun verify(
+) : EntitlementEnvelopeVerifier {
+    override fun verify(
         envelope: JSONObject,
         expectedAccountId: String,
         nowEpochMillis: Long
