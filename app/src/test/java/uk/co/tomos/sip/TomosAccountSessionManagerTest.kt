@@ -40,6 +40,7 @@ class TomosAccountSessionManagerTest {
         var fetchCount = 0
         var refreshCount = 0
         var revokeCount = 0
+        var restoreCount = 0
         var failRefresh = false
         var failRevoke = false
 
@@ -56,6 +57,7 @@ class TomosAccountSessionManagerTest {
             if (failRefresh) error("network unavailable")
             return refreshedSession
         }
+        override fun restorePurchases(session: TomosAccountSession) { restoreCount++ }
         override fun revokeSession(refreshToken: String) {
             revokeCount++
             if (failRevoke) error("network unavailable")
@@ -98,6 +100,7 @@ class TomosAccountSessionManagerTest {
         val result = manager(api, store).restorePurchases()
         assertEquals(1, api.refreshCount)
         assertEquals(1, api.fetchCount)
+        assertEquals(1, api.restoreCount)
         assertEquals(9_000_000L, store.session?.accessTokenExpiresAtEpochMillis)
         assertEquals(EntitlementStatus.PREMIUM_ACTIVE, result.status)
     }
