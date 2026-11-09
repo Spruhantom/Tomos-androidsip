@@ -52,7 +52,8 @@ class PremiumEntitlementsTest {
             status = EntitlementStatus.GRACE_PERIOD,
             graceUntilEpochMillis = 7_000L
         )
-        assertTrue(grace.grants(PremiumFeature.MULTIPLE_SIP_ACCOUNTS, 4_999L))
+        assertFalse(grace.grants(PremiumFeature.MULTIPLE_SIP_ACCOUNTS, 4_999L))
+        assertTrue(grace.grants(PremiumFeature.MULTIPLE_SIP_ACCOUNTS, 5_000L))
         assertTrue(grace.grants(PremiumFeature.MULTIPLE_SIP_ACCOUNTS, 6_999L))
         assertFalse(grace.grants(PremiumFeature.MULTIPLE_SIP_ACCOUNTS, 7_000L))
     }
