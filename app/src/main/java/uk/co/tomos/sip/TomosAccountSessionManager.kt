@@ -51,7 +51,13 @@ class TomosAccountSessionManager(
 
     @Synchronized
     fun signOut() {
-        store.clearSession()
+        val session = store.loadSession()
+        try {
+            session?.refreshToken?.let(api::revokeSession)
+        } finally {
+            // Always remove local credentials, even when the server is unavailable.
+            store.clearSession()
+        }
     }
 
     override fun current(): EntitlementSnapshot {
