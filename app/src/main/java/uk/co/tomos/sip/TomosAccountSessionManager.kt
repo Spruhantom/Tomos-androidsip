@@ -64,14 +64,18 @@ class TomosAccountSessionManager(
     }
 
     @Synchronized
-    fun signOut() {
+    fun signOut(): Boolean {
         val session = store.loadSession()
-        try {
+        val remotelyRevoked = try {
             session?.refreshToken?.let(api::revokeSession)
+            true
+        } catch (_: Exception) {
+            false
         } finally {
             // Always remove local credentials, even when the server is unavailable.
             store.clearSession()
         }
+        return remotelyRevoked
     }
 
     override fun current(): EntitlementSnapshot {
