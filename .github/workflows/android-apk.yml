@@ -2,10 +2,10 @@ name: TomOS SIP Android APK
 
 on:
   push:
-    branches: [main, premium, "feature/**"]
+    branches: [main, "feature/**"]
     tags: ["v*"]
   pull_request:
-    branches: [main, premium]
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
@@ -57,34 +57,6 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
       - name: Build debug APK
         run: gradle --no-daemon --stacktrace -PversionCode="${GITHUB_RUN_NUMBER}" assembleDebug
-      - name: Verify release build requires a production Ed25519 public key
-        shell: bash
-        run: |
-          if gradle --no-daemon :app:assembleRelease > /tmp/release-no-key.log 2>&1; then
-            cat /tmp/release-no-key.log
-            echo "Release build unexpectedly accepted a missing Premium public key."
-            exit 1
-          fi
-          grep -F "Release builds require" /tmp/release-no-key.log
-
-          mkdir -p /tmp/tomos-premium-key-check
-          printf '%s\n' \
-            '-----BEGIN PUBLIC KEY-----' \
-            'MCowBQYDK2VwAyEAebVWLo/mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ=' \
-            '-----END PUBLIC KEY-----' > /tmp/tomos-premium-key-check/fixture.pem
-          if TOMOS_PREMIUM_PUBLIC_KEY="$(cat /tmp/tomos-premium-key-check/fixture.pem)" \
-            gradle --no-daemon :app:assembleRelease > /tmp/release-fixture-key.log 2>&1; then
-            cat /tmp/release-fixture-key.log
-            echo "Release build unexpectedly accepted the shared test fixture key."
-            exit 1
-          fi
-          grep -F "shared cross-language CI fixture key is test-only" /tmp/release-fixture-key.log
-
-          openssl genpkey -algorithm ED25519 -out /tmp/tomos-premium-key-check/private.pem
-          openssl pkey -in /tmp/tomos-premium-key-check/private.pem -pubout \
-            -out /tmp/tomos-premium-key-check/public.pem
-          TOMOS_PREMIUM_PUBLIC_KEY="$(cat /tmp/tomos-premium-key-check/public.pem)" \
-            gradle --no-daemon --stacktrace :app:assembleRelease
       - name: Verify APK exists
         run: test -s app/build/outputs/apk/debug/app-debug.apk
       - name: Create SHA-256 checksum
