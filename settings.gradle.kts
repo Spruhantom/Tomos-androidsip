@@ -8,4 +8,4 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "TomOS-SIP"
-include(":app")
+include(":app", ":plugin-api")
