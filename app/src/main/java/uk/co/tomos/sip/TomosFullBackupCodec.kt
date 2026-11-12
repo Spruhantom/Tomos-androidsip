@@ -8,11 +8,9 @@ import com.google.gson.JsonParser
  * Portable full-state backup payload. The JSON produced by this codec contains
  * SIP passwords in memory and MUST only be passed directly to
  * TomosBackupEncryption.encrypt(); never write it to disk, log it, or share it
- * as plaintext. Android Keystore keys are deliberately not exported.
- *
- * Premium installation identity and device-bound licence are deliberately
- * excluded: ordinary in-place APK updates retain them, while another device
- * must obtain its own valid activation.
+ * as plaintext. Android Keystore keys and account authentication tokens are
+ * deliberately not exported; credentials are included only inside the encrypted
+ * backup payload.
  */
 data class TomosFullBackupDocument(
     val schemaVersion: Int,
