@@ -1,6 +1,6 @@
 # TomOS SIP Plugin API — Initial Specification
 
-Status: SDK prototype implemented on the plugin-sdk-prototype branch. The AIDL contracts, capability catalogue, strict manifest parser and installed-package verifier exist; the full host runtime and directory are still under development.
+Status: SDK prototype implemented. The AIDL contracts, capability catalogue, strict manifest parser and installed-package verifier exist; the full host runtime and directory are still under development.
 
 ## 1. Goals
 
@@ -10,9 +10,7 @@ Plugins are independent Android applications. TomOS SIP must not download arbitr
 
 ## 2. Runtime and IPC
 
-Initial implementation target: an explicit, bound Android service contract using Binder/AIDL. The final choice between generated AIDL and a Kotlin Binder wrapper must be confirmed with a prototype and Android-version tests.
-
-Requirements:
+Initial implementation target: an explicit, bound Android service contract using Binder/AIDL. Requirements:
 
 - Explicit component binding; no implicit broadcasts for privileged operations.
 - Binder caller UID/package identity checked by the host.
@@ -24,7 +22,7 @@ Requirements:
 
 ## 3. Plugin manifest
 
-The directory and installed package must agree on a signed manifest. Proposed fields:
+The directory and installed package must agree on a signed manifest.
 
 | Field | Meaning |
 |---|---|
@@ -43,16 +41,15 @@ The directory and installed package must agree on a signed manifest. Proposed fi
 
 A plugin ID is not proof of publisher identity. The host must verify the installed APK signer and directory signature.
 
-## 4. Initial capability catalogue
+## 4. Capability catalogue
 
-Free capabilities (subject to user consent):
+All SDK capabilities are available in the free app. Each plugin must still request only the permissions it needs, and users must explicitly grant those permissions.
+
 - `call.events.read.basic` — receive limited call lifecycle events.
 - `notifications.post` — post plugin-scoped notifications.
 - `contacts.read` — read contacts only when the user grants access.
-- `contacts.write` — not granted by default; require explicit consent.
+- `contacts.write` — require explicit consent.
 - `settings.read.basic` — read non-secret app preferences.
-
-paid capabilities (also require an active entitlement):
 - `call.actions.advanced` — request supported advanced call actions.
 - `call.routing.advanced` — participate in approved routing workflows.
 - `automation.rules` — register bounded automation rules.
@@ -60,7 +57,7 @@ paid capabilities (also require an active entitlement):
 - `codec.profiles.manage` — manage supported codec profiles through host validation.
 - `crm.integrations` — use mediated CRM integration interfaces.
 
-Capabilities are deny-by-default. paid status never bypasses the user's per-plugin permission grant.
+Capabilities are deny-by-default. Payment status is not part of the permission model; explicit user consent and host-side validation are required.
 
 ## 5. Security and privacy rules
 
@@ -75,9 +72,9 @@ Capabilities are deny-by-default. paid status never bypasses the user's per-plug
 - Avoid collecting call contents, audio or contact data unless a specific feature requires it and the user explicitly consents.
 - Plugins must not run unrestricted background work; use bounded host-managed lifecycle callbacks.
 
-## 6. Host API surface (conceptual)
+## 6. Host API surface
 
-The first SDK should expose narrow interfaces rather than internal implementation classes:
+The SDK should expose narrow interfaces rather than internal implementation classes:
 
 - `PluginMetadata` — validated plugin identity and compatibility.
 - `PluginCapability` — a declared permission identifier.
@@ -94,7 +91,6 @@ No interface should accept or return SIP passwords, authentication tokens, Linph
 
 Directory entries are community-submitted and reviewed before publication.
 
-Submission pipeline:
 1. Developer registers a publisher identity and signing certificate.
 2. Developer submits manifest, APK, source link, privacy policy and requested capabilities.
 3. Automated checks validate schema, package ID, API range, signer, digest, dependencies and basic security signals.
@@ -102,12 +98,7 @@ Submission pipeline:
 5. Approved version is published with review status and release history.
 6. Updates repeat signature, digest, compatibility and review checks.
 
-The directory should distinguish:
-- Verified and approved.
-- Community submitted / pending review (not installable by default).
-- Rejected or revoked.
-
-Provide reporting and takedown mechanisms. Never silently replace a plugin package with a different signer.
+The directory should distinguish verified/approved, pending review (not installable by default), and rejected/revoked entries. Provide reporting and takedown mechanisms. Never silently replace a plugin package with a different signer.
 
 ## 8. Compatibility and lifecycle
 
@@ -120,24 +111,22 @@ Provide reporting and takedown mechanisms. Never silently replace a plugin packa
 
 ## 9. Required tests
 
-- Valid and invalid plugin signatures.
 - Package name spoofing and signer changes.
 - Directory digest mismatch and tampered manifest.
 - Unsupported API and host version.
-- Missing/revoked capabilities.
+- Missing/revoked user grants.
 - Binder caller identity validation.
 - Malformed, oversized and slow IPC requests.
 - Plugin crash, timeout and repeated reconnect.
-- paid expiry while a plugin is enabled.
 - Permission revocation during active use.
 - Ensure plugins cannot access SIP credentials or call audio by default.
 
 ## 10. Implemented SDK prototype
 
-The `:plugin-api` Android library now contains:
+The `:plugin-api` Android library contains:
 
 - Versioned AIDL interfaces for the plugin service, host callbacks and action results.
-- A stable capability identifier catalogue, including unified capability catalogue.
+- A unified capability identifier catalogue.
 - Strict manifest parsing for plugin identity, semantic version, API compatibility, minimum host version, service component, requested capabilities, APK digest and signer digest.
 - Unit tests for compatibility, malformed IDs/digests, unknown/duplicate capabilities and size limits.
 - A host-side installed-package verifier in the app that checks package ID, one-APK installation, signer certificate SHA-256, APK SHA-256, exported service and manifest metadata.
@@ -149,9 +138,9 @@ See `plugin-api/README.md` for the developer-facing contract and example manifes
 
 ## 11. First sample plugins
 
-- Free: call-event notification plugin.
-- Free: read-only contact lookup plugin.
-- paid: advanced call-routing plugin.
-- paid: mediated encrypted-backup provider.
+- Call-event notification plugin.
+- Read-only contact lookup plugin.
+- Advanced call-routing plugin.
+- Mediated encrypted-backup provider.
 
 These are test fixtures until reviewed and released through the official directory.
