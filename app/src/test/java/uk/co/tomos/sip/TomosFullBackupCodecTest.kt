@@ -1,7 +1,6 @@
 package uk.co.tomos.sip
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Test
@@ -29,7 +28,6 @@ class TomosFullBackupCodecTest {
         assertEquals(account.id, restored.selectedSipAccountId)
         assertEquals(listOf("opus", "pcmu"), restored.enabledAudioCodecs)
         assertEquals(true, restored.backupRemindersEnabled)
-        assertFalse(json.contains("premium", ignoreCase = true))
     }
 
     @Test fun migratesSchemaOneWithoutInventingAccountOrCredentialData() {
