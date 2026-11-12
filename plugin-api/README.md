@@ -58,7 +58,7 @@ The digests above are placeholders and must be replaced with the actual build ar
 ## Security requirements
 
 - A manifest is a request, not a permission grant.
-- The host checks each capability against the user's grant and current Premium entitlement.
+- The host checks each capability against the user's explicit per-plugin grant. All SDK capabilities are available without payment or subscription.
 - The host verifies the official directory signature, installed package ID, APK digest, signing certificate, exported service and manifest metadata before binding.
 - The host validates Binder caller UID on every callback; it must not trust a package name supplied in JSON.
 - Plugins receive no SIP passwords, account credentials, raw Linphone objects, call audio or unrestricted filesystem access.
