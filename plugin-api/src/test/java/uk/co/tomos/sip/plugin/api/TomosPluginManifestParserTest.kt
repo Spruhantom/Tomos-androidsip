@@ -3,7 +3,6 @@ package uk.co.tomos.sip.plugin.api
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -35,16 +34,17 @@ class TomosPluginManifestParserTest {
     fun parsesCompatibleFreePluginManifest() {
         val parsed = TomosPluginManifestParser.parse(manifest())
         assertEquals("uk.co.tomos.plugin.sample", parsed.pluginId)
-        assertFalse(parsed.requestsPremiumCapabilities)
         assertEquals(setOf(PluginCapability.CALL_EVENTS_READ_BASIC), parsed.capabilities)
     }
 
     @Test
-    fun identifiesPremiumCapabilities() {
+    fun acceptsAdvancedCapabilitiesWithoutPaidEntitlement() {
         val parsed = TomosPluginManifestParser.parse(
-            manifest(capabilities = listOf("call.events.read.basic", "call.routing.advanced"))
+            manifest(capabilities = listOf("call.events.read.basic", "call.routing.advanced", "backup.export"))
         )
-        assertTrue(parsed.requestsPremiumCapabilities)
+        assertEquals(3, parsed.capabilities.size)
+        assertTrue(parsed.capabilities.contains(PluginCapability.CALL_ROUTING_ADVANCED))
+        assertTrue(parsed.capabilities.contains(PluginCapability.BACKUP_EXPORT))
     }
 
     @Test
