@@ -52,7 +52,7 @@ Free capabilities (subject to user consent):
 - `contacts.write` — not granted by default; require explicit consent.
 - `settings.read.basic` — read non-secret app preferences.
 
-Premium capabilities (also require an active entitlement):
+paid capabilities (also require an active entitlement):
 - `call.actions.advanced` — request supported advanced call actions.
 - `call.routing.advanced` — participate in approved routing workflows.
 - `automation.rules` — register bounded automation rules.
@@ -60,7 +60,7 @@ Premium capabilities (also require an active entitlement):
 - `codec.profiles.manage` — manage supported codec profiles through host validation.
 - `crm.integrations` — use mediated CRM integration interfaces.
 
-Capabilities are deny-by-default. Premium status never bypasses the user's per-plugin permission grant.
+Capabilities are deny-by-default. paid status never bypasses the user's per-plugin permission grant.
 
 ## 5. Security and privacy rules
 
@@ -128,7 +128,7 @@ Provide reporting and takedown mechanisms. Never silently replace a plugin packa
 - Binder caller identity validation.
 - Malformed, oversized and slow IPC requests.
 - Plugin crash, timeout and repeated reconnect.
-- Premium expiry while a plugin is enabled.
+- paid expiry while a plugin is enabled.
 - Permission revocation during active use.
 - Ensure plugins cannot access SIP credentials or call audio by default.
 
@@ -137,7 +137,7 @@ Provide reporting and takedown mechanisms. Never silently replace a plugin packa
 The `:plugin-api` Android library now contains:
 
 - Versioned AIDL interfaces for the plugin service, host callbacks and action results.
-- A stable capability identifier catalogue, including Free/Premium capability classification.
+- A stable capability identifier catalogue, including unified capability catalogue.
 - Strict manifest parsing for plugin identity, semantic version, API compatibility, minimum host version, service component, requested capabilities, APK digest and signer digest.
 - Unit tests for compatibility, malformed IDs/digests, unknown/duplicate capabilities and size limits.
 - A host-side installed-package verifier in the app that checks package ID, one-APK installation, signer certificate SHA-256, APK SHA-256, exported service and manifest metadata.
@@ -151,7 +151,7 @@ See `plugin-api/README.md` for the developer-facing contract and example manifes
 
 - Free: call-event notification plugin.
 - Free: read-only contact lookup plugin.
-- Premium: advanced call-routing plugin.
-- Premium: mediated encrypted-backup provider.
+- paid: advanced call-routing plugin.
+- paid: mediated encrypted-backup provider.
 
 These are test fixtures until reviewed and released through the official directory.
