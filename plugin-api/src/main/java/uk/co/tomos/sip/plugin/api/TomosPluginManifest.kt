@@ -8,22 +8,19 @@ object TomosPluginApi {
     const val MAX_IPC_JSON_BYTES = 32 * 1024
 }
 
-enum class PluginCapability(
-    val id: String,
-    val requiresPremium: Boolean
-) {
-    CALL_EVENTS_READ_BASIC("call.events.read.basic", false),
-    NOTIFICATIONS_POST("notifications.post", false),
-    CONTACTS_READ("contacts.read", false),
-    CONTACTS_WRITE("contacts.write", false),
-    SETTINGS_READ_BASIC("settings.read.basic", false),
-    CALL_ACTIONS_ADVANCED("call.actions.advanced", true),
-    CALL_ROUTING_ADVANCED("call.routing.advanced", true),
-    AUTOMATION_RULES("automation.rules", true),
-    BACKUP_EXPORT("backup.export", true),
-    BACKUP_IMPORT("backup.import", true),
-    CODEC_PROFILES_MANAGE("codec.profiles.manage", true),
-    CRM_INTEGRATIONS("crm.integrations", true);
+enum class PluginCapability(val id: String) {
+    CALL_EVENTS_READ_BASIC("call.events.read.basic"),
+    NOTIFICATIONS_POST("notifications.post"),
+    CONTACTS_READ("contacts.read"),
+    CONTACTS_WRITE("contacts.write"),
+    SETTINGS_READ_BASIC("settings.read.basic"),
+    CALL_ACTIONS_ADVANCED("call.actions.advanced"),
+    CALL_ROUTING_ADVANCED("call.routing.advanced"),
+    AUTOMATION_RULES("automation.rules"),
+    BACKUP_EXPORT("backup.export"),
+    BACKUP_IMPORT("backup.import"),
+    CODEC_PROFILES_MANAGE("codec.profiles.manage"),
+    CRM_INTEGRATIONS("crm.integrations");
 
     companion object {
         fun fromId(id: String): PluginCapability? = entries.firstOrNull { it.id == id }
@@ -45,10 +42,7 @@ data class TomosPluginManifest(
     val signingCertificateSha256: String,
     val privacyPolicyUrl: String?,
     val sourceUrl: String?
-) {
-    val requestsPremiumCapabilities: Boolean
-        get() = capabilities.any(PluginCapability::requiresPremium)
-}
+)
 
 /**
  * Strict parser for a directory-signed plugin manifest.
