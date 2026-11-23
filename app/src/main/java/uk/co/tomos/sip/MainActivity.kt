@@ -17,7 +17,6 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import java.io.File
-import java.util.Locale
 import androidx.core.content.FileProvider
 import androidx.core.app.NotificationCompat
 import androidx.core.app.Person
