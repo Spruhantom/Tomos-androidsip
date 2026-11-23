@@ -72,7 +72,10 @@ class SipCredentialStore(context: Context) {
     /**
      * Re-encrypt credentials using this installation's Keystore keys. This is
      * intentionally called only after the outer encrypted backup authenticated.
-     * Existing values are snapshotted and restored if any write fails.
+     *
+     * If a write fails, every previously stored value is restored where possible.
+     * A rollback failure is reported explicitly rather than claiming that the
+     * existing credentials were restored successfully.
      */
     @Synchronized
     fun restoreFromEncryptedBackup(credentials: Map<String, String>) {
@@ -82,12 +85,23 @@ class SipCredentialStore(context: Context) {
         try {
             credentials.forEach { (accountId, password) -> save(accountId, password) }
         } catch (failure: Exception) {
+            val rollbackFailures = mutableListOf<Exception>()
             previous.forEach { (accountId, password) ->
-                runCatching {
+                try {
                     if (password == null) delete(accountId) else save(accountId, password)
+                } catch (rollbackFailure: Exception) {
+                    rollbackFailures += rollbackFailure
                 }
             }
-            throw IllegalStateException("Unable to restore SIP credentials. Existing credentials were rolled back.", failure)
+
+            val message = if (rollbackFailures.isEmpty()) {
+                "Unable to restore SIP credentials. Existing credentials were rolled back."
+            } else {
+                "Unable to restore SIP credentials, and rollback was incomplete. Check account credentials before calling."
+            }
+            throw IllegalStateException(message, failure).also { error ->
+                rollbackFailures.forEach(error::addSuppressed)
+            }
         }
     }
 
