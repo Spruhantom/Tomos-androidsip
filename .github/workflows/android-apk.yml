@@ -12,13 +12,17 @@ concurrency:
   group: tomos-android-apk-${{ github.ref }}
   cancel-in-progress: true
 
+# Default to read-only. Only the release-publishing job receives write access.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   unit-tests:
-    name: Run Kotlin unit tests
+    name: Run Kotlin tests and Android lint
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -29,22 +33,29 @@ jobs:
           java-version: "17"
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
-      - name: Run Android unit tests
+      - name: Run Kotlin unit tests
         run: gradle --no-daemon --stacktrace testDebugUnitTest :plugin-api:testDebugUnitTest
-      - name: Upload unit-test reports
+      - name: Run Android lint
+        run: gradle --no-daemon --stacktrace lintDebug :plugin-api:lintDebug
+      - name: Upload test and lint reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: TomOS-SIP-Unit-Test-Reports
+          name: TomOS-SIP-Validation-Reports
           path: |
             app/build/reports/tests/testDebugUnitTest/
             plugin-api/build/reports/tests/testDebugUnitTest/
+            app/build/reports/lint-results-debug.html
+            plugin-api/build/reports/lint-results-debug.html
           if-no-files-found: warn
           retention-days: 14
 
   build:
-    name: Build Android APK
+    name: Build and package Android APKs
     runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: write
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -55,22 +66,28 @@ jobs:
           java-version: "17"
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
-      - name: Build debug APK
-        run: gradle --no-daemon --stacktrace -PversionCode="${GITHUB_RUN_NUMBER}" assembleDebug
-      - name: Verify APK exists
-        run: test -s app/build/outputs/apk/debug/app-debug.apk
-      - name: Create SHA-256 checksum
-        run: sha256sum app/build/outputs/apk/debug/app-debug.apk > app/build/outputs/apk/debug/app-debug.apk.sha256
-      - name: Upload APK as workflow artifact
+      - name: Build debug and release variants
+        run: gradle --no-daemon --stacktrace -PversionCode="${GITHUB_RUN_NUMBER}" assembleDebug assembleRelease
+      - name: Verify APK outputs
+        run: |
+          test -s app/build/outputs/apk/debug/app-debug.apk
+          test -s app/build/outputs/apk/release/app-release-unsigned.apk
+      - name: Create SHA-256 checksums
+        run: |
+          sha256sum app/build/outputs/apk/debug/app-debug.apk > app/build/outputs/apk/debug/app-debug.apk.sha256
+          sha256sum app/build/outputs/apk/release/app-release-unsigned.apk > app/build/outputs/apk/release/app-release-unsigned.apk.sha256
+      - name: Upload APKs as workflow artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: TomOS-SIP-Android-APK
+          name: TomOS-SIP-Android-APKs
           path: |
             app/build/outputs/apk/debug/app-debug.apk
             app/build/outputs/apk/debug/app-debug.apk.sha256
+            app/build/outputs/apk/release/app-release-unsigned.apk
+            app/build/outputs/apk/release/app-release-unsigned.apk.sha256
           if-no-files-found: error
           retention-days: 30
-      - name: Publish APK to GitHub Release
+      - name: Publish debug APK to GitHub Release
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
