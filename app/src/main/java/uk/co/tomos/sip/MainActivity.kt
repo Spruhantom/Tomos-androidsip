@@ -17,6 +17,7 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import java.io.File
+import java.util.Locale
 import androidx.core.content.FileProvider
 import androidx.core.app.NotificationCompat
 import androidx.core.app.Person
@@ -189,7 +190,7 @@ class MainActivity : ComponentActivity() {
     private val notificationPermissionRequest = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             setShowWhenLocked(true)
             setTurnScreenOn(true)
         }
@@ -1762,7 +1763,7 @@ private fun ActiveCallScreen(engine: TomSipEngine, elapsedSeconds: Int, modifier
                 color = if (engine.callStatus == "On hold") Pink else Cyan,
                 fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
             if (engine.callStartedAtMillis > 0L) {
-                Text(String.format("%02d:%02d", elapsedSeconds / 60, elapsedSeconds % 60),
+                Text(String.format(Locale.ROOT, "%02d:%02d", elapsedSeconds / 60, elapsedSeconds % 60),
                     color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.Light)
             } else if (!isIncoming) Text("Connecting…", color = Muted, fontSize = 16.sp)
         }
