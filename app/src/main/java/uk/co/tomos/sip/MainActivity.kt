@@ -406,7 +406,6 @@ class TomSipEngine(context: android.content.Context) {
     private var pendingNetworkRefresh: Runnable? = null
     private var pendingRegistrationRetry: Runnable? = null
     private var registrationRetryAttempt = 0
-    private val maxRegistrationRetries = 3
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
             // Wait for validated internet; Wi-Fi association alone does not mean
@@ -446,9 +445,15 @@ class TomSipEngine(context: android.content.Context) {
                     registrationStates = registrationStates + (profileId to SipAccountRegistration(profileId, stateLabel, message))
                     registered = registrationStates.values.any { it.state == "Registered" }
                     if (state == RegistrationState.Ok) {
-                        registrationRetryAttempt = 0
-                        pendingRegistrationRetry?.let(recoveryHandler::removeCallbacks)
-                        pendingRegistrationRetry = null
+                        // One healthy account must not cancel recovery for another
+                        // account that is still failing to register.
+                        if (registrationStates.values.none { it.state == "Registration failed" }) {
+                            registrationRetryAttempt = 0
+                            pendingRegistrationRetry?.let(recoveryHandler::removeCallbacks)
+                            pendingRegistrationRetry = null
+                        } else {
+                            scheduleRegistrationRetry()
+                        }
                     } else if (state == RegistrationState.Failed) {
                         scheduleRegistrationRetry()
                     }
@@ -578,12 +583,16 @@ class TomSipEngine(context: android.content.Context) {
     }
 
     private fun scheduleRegistrationRetry() {
-        if (pendingRegistrationRetry != null || registrationRetryAttempt >= maxRegistrationRetries) return
-        val delayMillis = 5_000L * (1L shl registrationRetryAttempt)
-        registrationRetryAttempt += 1
+        if (pendingRegistrationRetry != null) return
+        // Keep retrying while any account is failing, with exponential backoff
+        // capped at five minutes. A transient PBX outage must not permanently
+        // disable recovery merely because a small retry budget was exhausted.
+        val delayMillis = SipRegistrationRetryPolicy.delayMillis(registrationRetryAttempt)
+        registrationRetryAttempt = SipRegistrationRetryPolicy.nextAttempt(registrationRetryAttempt)
         val retry = Runnable {
             pendingRegistrationRetry = null
-            // Avoid retrying while Android has no active default network.
+            // Avoid retrying while Android has no active default network. A
+            // validated-network callback will trigger a fresh registration pass.
             if (hasValidatedInternet()) {
                 runCatching { core.refreshRegisters() }
             }
